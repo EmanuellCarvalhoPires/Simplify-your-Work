@@ -1,0 +1,49 @@
+{
+  "name": "simplify-your-work",
+  "private": true,
+  "version": "1.0.0",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "convert-assets": "node scripts/convert-assets.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tiptap/extension-color": "^3.30.0",
+    "@tiptap/extension-highlight": "^3.30.0",
+    "@tiptap/extension-image": "^3.30.0",
+    "@tiptap/extension-link": "^3.30.0",
+    "@tiptap/extension-placeholder": "^3.30.0",
+    "@tiptap/extension-table": "^3.30.0",
+    "@tiptap/extension-text-style": "^3.30.0",
+    "@tiptap/extension-underline": "^3.30.0",
+    "@tiptap/pm": "^3.30.0",
+    "@tiptap/react": "^3.30.0",
+    "@tiptap/starter-kit": "^3.30.0",
+    "@types/marked": "^5.0.2",
+    "better-sqlite3": "^13.0.3",
+    "electron-store": "^11.0.2",
+    "lucide-react": "^1.31.0",
+    "marked": "^18.0.9",
+    "mongoose": "^9.9.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vite-plugin-electron": "^1.1.1",
+    "vite-plugin-electron-renderer": "^1.0.0"
+  }
+}

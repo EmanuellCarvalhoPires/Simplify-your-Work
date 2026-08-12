@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <defs>
+    <linearGradient id="fullBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e2e"/>
+      <stop offset="100%" stop-color="#0f0f17"/>
+    </linearGradient>
+
+    <linearGradient id="textAccent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <linearGradient id="iconBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+
+    <linearGradient id="iconPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#7e22ce"/>
+    </linearGradient>
+
+    <linearGradient id="iconEmerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+
+    <filter id="fullShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base Container -->
+  <rect x="0" y="0" width="800" height="200" rx="24" fill="url(#fullBg)"/>
+
+  <!-- Left Symbol Icon -->
+  <g transform="translate(30, 20)">
+    <!-- Outer Squircle -->
+    <rect x="0" y="0" width="160" height="160" rx="36" fill="#181825" stroke="rgba(255, 255, 255, 0.1)" stroke-width="2" filter="url(#fullShadow)"/>
+    <!-- Cards & Checkmark -->
+    <path d="M 35 50 Q 35 42 43 42 L 85 42 Q 93 42 93 50 L 93 115 Q 93 123 85 123 L 43 123 Q 35 123 35 115 Z" fill="url(#iconBlue)" opacity="0.9"/>
+    <path d="M 72 40 Q 72 32 80 32 L 122 32 Q 130 32 130 40 L 130 105 Q 130 113 122 113 L 80 113 Q 72 113 72 105 Z" fill="url(#iconPurple)" opacity="0.85"/>
+    <path d="M 48 85 L 72 108 L 118 60" fill="none" stroke="url(#iconEmerald)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 48 85 L 72 108 L 118 60" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  </g>
+
+  <!-- Typography Text -->
+  <g transform="translate(220, 110)">
+    <!-- "Simplify" -->
+    <text x="0" y="0" font-family="Segoe UI, Roboto, Helvetica, sans-serif" font-size="58" font-weight="800" fill="#ffffff" letter-spacing="-1">Simplify</text>
+    <!-- "your Work" -->
+    <text x="245" y="0" font-family="Segoe UI, Roboto, Helvetica, sans-serif" font-size="58" font-weight="700" fill="url(#textAccent)" letter-spacing="-1">your Work</text>
+    <!-- Subtitle -->
+    <text x="4" y="36" font-family="Segoe UI, Roboto, Helvetica, sans-serif" font-size="20" font-weight="500" fill="#94a3b8" letter-spacing="1">TASK UNIFICATION &amp; PRODUCTIVITY SUITE</text>
+  </g>
+</svg>
