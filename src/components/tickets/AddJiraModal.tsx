@@ -18,6 +18,7 @@ import {
 
 interface AddJiraModalProps {
   jiraInstances: JiraInstance[];
+  existingTickets?: Ticket[];
   onClose: () => void;
   onFetchJiraTicket: (key: string, instanceId: string) => Promise<void>;
   onOpenSettings: () => void;
@@ -27,6 +28,7 @@ interface AddJiraModalProps {
 
 export const AddJiraModal: React.FC<AddJiraModalProps> = ({
   jiraInstances,
+  existingTickets = [],
   onClose,
   onFetchJiraTicket,
   onOpenSettings,
@@ -112,10 +114,42 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
           return;
         }
 
+        // Check if ticket with this key already exists
+        let currentTickets = existingTickets;
+        if (window.electronAPI && window.electronAPI.getTickets) {
+          try {
+            const dbTickets = await window.electronAPI.getTickets();
+            if (Array.isArray(dbTickets) && dbTickets.length > 0) {
+              currentTickets = dbTickets;
+            }
+          } catch (e) {}
+        }
+
+        const alreadyExists = currentTickets.some((t) => {
+          const tKey = (t.key || '').trim().toUpperCase();
+          return (
+            tKey === cleanKey ||
+            t.id === `jira_${cleanKey}_${selectedInstanceId}` ||
+            (t.id && t.id.toUpperCase().includes(`_${cleanKey}_`))
+          );
+        });
+
+        if (alreadyExists) {
+          const warningMsg = `O ticket com a chave "${cleanKey}" já existe no aplicativo! Não foi criado um novo ticket.`;
+          setErrorMsg(warningMsg);
+          if (onErrorNotice) onErrorNotice(warningMsg);
+          setLoading(false);
+          return;
+        }
+
         await onFetchJiraTicket(cleanKey, selectedInstanceId);
-        const successText = `Ticket ${cleanKey} puxado e atualizado com sucesso do Jira!`;
+        const successText = `Ticket ${cleanKey} puxado e criado com sucesso do Jira!`;
         setSuccessMsg(successText);
         if (onSuccessNotice) onSuccessNotice(successText);
+
+        setTimeout(() => {
+          onClose();
+        }, 1500);
       } else if (importMode === 'JQL') {
         const cleanJql = jqlQuery.trim();
         if (!cleanJql) {
@@ -126,9 +160,31 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
 
         if (window.electronAPI && window.electronAPI.fetchJiraTicketsByJql) {
           const res = await window.electronAPI.fetchJiraTicketsByJql(cleanJql, selectedInstanceId);
-          const successText = `✨ Execução JQL concluída! ${res.newCount} novos tickets importados e ${res.updatedCount} tickets existentes atualizados com comentários e alterações!`;
-          setSuccessMsg(successText);
-          if (onSuccessNotice) onSuccessNotice(successText);
+          
+          if (res.newCount === 0 && res.existingCount > 0) {
+            const warningText = `Nenhum novo ticket criado. Os seguintes tickets retornados pela busca JQL já existem no aplicativo: ${res.existingKeys.join(', ')}.`;
+            setErrorMsg(warningText);
+            if (onErrorNotice) onErrorNotice(warningText);
+            setLoading(false);
+            return;
+          } else if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0)) {
+            const infoText = 'Nenhum ticket foi retornado pelo Jira para a consulta JQL informada.';
+            setErrorMsg(infoText);
+            if (onErrorNotice) onErrorNotice(infoText);
+            setLoading(false);
+            return;
+          } else {
+            let successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
+            if (res.existingCount > 0) {
+              successText += ` (Ignorado(s) ${res.existingCount} ticket(s) já existente(s): ${res.existingKeys.join(', ')})`;
+            }
+            setSuccessMsg(successText);
+            if (onSuccessNotice) onSuccessNotice(successText);
+
+            setTimeout(() => {
+              onClose();
+            }, 2000);
+          }
         }
       } else if (importMode === 'FILTER') {
         const cleanFilterInput = filterLinkOrId.trim();
@@ -140,15 +196,33 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
 
         if (window.electronAPI && window.electronAPI.fetchJiraTicketsByJql) {
           const res = await window.electronAPI.fetchJiraTicketsByJql(cleanFilterInput, selectedInstanceId);
-          const successText = `✨ Filtro Jira importado! ${res.newCount} novos tickets importados e ${res.updatedCount} tickets existentes atualizados com alterações!`;
-          setSuccessMsg(successText);
-          if (onSuccessNotice) onSuccessNotice(successText);
+          
+          if (res.newCount === 0 && res.existingCount > 0) {
+            const warningText = `Nenhum novo ticket criado. Os seguintes tickets do filtro já existem no aplicativo: ${res.existingKeys.join(', ')}.`;
+            setErrorMsg(warningText);
+            if (onErrorNotice) onErrorNotice(warningText);
+            setLoading(false);
+            return;
+          } else if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0)) {
+            const infoText = 'Nenhum ticket foi retornado pelo Jira para o filtro informado.';
+            setErrorMsg(infoText);
+            if (onErrorNotice) onErrorNotice(infoText);
+            setLoading(false);
+            return;
+          } else {
+            let successText = `✨ Filtro Jira importado! ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
+            if (res.existingCount > 0) {
+              successText += ` (Ignorado(s) ${res.existingCount} ticket(s) já existente(s): ${res.existingKeys.join(', ')})`;
+            }
+            setSuccessMsg(successText);
+            if (onSuccessNotice) onSuccessNotice(successText);
+
+            setTimeout(() => {
+              onClose();
+            }, 2000);
+          }
         }
       }
-
-      setTimeout(() => {
-        onClose();
-      }, 1500);
     } catch (err: any) {
       console.error(err);
       const errMsg = err.message || 'Falha ao importar tickets do Jira. Verifique as credenciais ou a sintaxe da busca.';
@@ -175,22 +249,95 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
         {jiraInstances.length === 0 ? (
           <div style={styles.emptyWarning}>
             <AlertCircle size={36} color="#f59e0b" />
-            <p style={{ marginTop: '12px', fontSize: '15px', color: 'var(--text-primary)' }}>
-              Nenhuma chave de API do Jira cadastrada.
+            <p style={{ marginTop: '12px', fontSize: '15px', color: 'var(--text-primary)', fontWeight: '700' }}>
+              Nenhuma conta do Jira conectada.
             </p>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Para puxar tickets da Atlassian, você precisa cadastrar o domínio e a API Key da instância Jira.
+              Faça login com a sua conta Atlassian para importar seus sites Jira automaticamente ou cadastre manualmente.
             </p>
-            <button
-              className="btn btn-primary"
-              style={{ marginTop: '18px' }}
-              onClick={() => {
-                onClose();
-                onOpenSettings();
-              }}
-            >
-              <Settings size={16} /> Cadastrar API do Jira nas Configurações
-            </button>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '18px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {loading ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    if (window.electronAPI?.cancelAtlassianOAuth) {
+                      await window.electronAPI.cancelAtlassianOAuth();
+                    }
+                    setLoading(false);
+                  }}
+                  style={{ backgroundColor: '#ef4444', color: '#ffffff', borderColor: '#ef4444' }}
+                >
+                  🔄 Resetar / Tentar De Novo
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    if (!window.electronAPI?.startAtlassianOAuth) return;
+                    try {
+                      setLoading(true);
+                      const result = await window.electronAPI.startAtlassianOAuth();
+
+                      let userMsg = '';
+                      if (result && result.userInfo && result.userInfo.email) {
+                        const uEmail = result.userInfo.email.trim();
+                        const uName = result.userInfo.name?.trim() || uEmail.split('@')[0] || 'Usuário Atlassian';
+                        userMsg = ` (${uName})`;
+
+                        const allUsers = (await window.electronAPI.getUsers()) || [];
+                        const existing = allUsers.find((u) => u.email.trim().toLowerCase() === uEmail.toLowerCase());
+
+                        let targetUser: UserProfile;
+                        if (existing) {
+                          targetUser = await window.electronAPI.saveUser({
+                            ...existing,
+                            name: existing.name || uName,
+                          });
+                        } else {
+                          targetUser = await window.electronAPI.saveUser({
+                            name: uName,
+                            email: uEmail,
+                            role: 'Assistente Atlassian',
+                            avatarColor: '#6366f1',
+                          });
+                        }
+
+                        if (targetUser && targetUser.id) {
+                          await window.electronAPI.setActiveUser(targetUser.id);
+                        }
+                      }
+
+                      if (result && result.sites.length > 0) {
+                        if (onSuccessNotice) {
+                          onSuccessNotice(`✨ ${result.sites.length} site(s) Jira conectado(s) via Atlassian OAuth${userMsg}!`);
+                        }
+                        onClose();
+                        onOpenSettings();
+                      }
+                    } catch (err: any) {
+                      setErrorMsg(`Falha no login Atlassian: ${err.message}`);
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  style={{ backgroundColor: '#6366f1' }}
+                >
+                  ⚡ Entrar com Conta Atlassian
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  onClose();
+                  onOpenSettings();
+                }}
+              >
+                <Settings size={16} /> Cadastrar Manualmente
+              </button>
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px', marginTop: '16px' }}>

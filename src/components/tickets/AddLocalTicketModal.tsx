@@ -62,7 +62,7 @@ export const AddLocalTicketModal: React.FC<AddLocalTicketModalProps> = ({ onClos
         <div style={styles.modalHeader}>
           <div style={styles.titleGroup}>
             <img src="./assets/app-badge.png" alt="App" style={{ width: '28px', height: '28px' }} />
-            <h2 style={{ fontSize: '20px', fontWeight: '800' }}>Criar Novo Ticket Local</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: '800' }}>Criar Nova Tarefa</h2>
           </div>
           <button className="btn-icon" onClick={onClose}>
             <X size={18} />
@@ -139,7 +139,7 @@ export const AddLocalTicketModal: React.FC<AddLocalTicketModalProps> = ({ onClos
             </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>
               <Plus size={18} />
-              {loading ? 'Salvando...' : 'Criar Ticket Local'}
+              {loading ? 'Salvando...' : 'Criar Tarefa'}
             </button>
           </div>
         </form>

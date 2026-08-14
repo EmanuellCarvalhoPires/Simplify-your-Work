@@ -29,37 +29,60 @@ export function parseAdfToText(adfObj: any): string {
   return String(adfObj);
 }
 
-export async function fetchJiraIssue(ticketKey: string, instance: JiraInstance): Promise<Ticket> {
+// Helper to build request URL and Headers depending on Auth Type (OAuth 2.0 3LO Bearer vs Basic API Token)
+function getJiraRequestConfig(instance: JiraInstance, apiPath: string) {
+  const isOAuth = instance.authType === 'OAUTH' || Boolean(instance.cloudId && (instance.accessToken || instance.apiToken));
+  const cleanPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+
+  if (isOAuth && instance.cloudId) {
+    const token = instance.accessToken || instance.apiToken || '';
+    return {
+      isOAuth: true,
+      url: `https://api.atlassian.com/ex/jira/${instance.cloudId}${cleanPath}`,
+      headers: {
+        'Authorization': `Bearer ${token.trim()}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    };
+  }
+
   let cleanDomain = instance.domain.trim().replace(/\/+$/, '');
   if (!cleanDomain.startsWith('http://') && !cleanDomain.startsWith('https://')) {
     cleanDomain = `https://${cleanDomain}`;
   }
-
-  const formattedKey = ticketKey.trim().toUpperCase();
-  const url = `${cleanDomain}/rest/api/3/issue/${formattedKey}`;
-
   const authString = `${instance.email.trim()}:${instance.apiToken.trim()}`;
   const base64Auth = Buffer.from(authString).toString('base64');
+  return {
+    isOAuth: false,
+    url: `${cleanDomain}${cleanPath}`,
+    headers: {
+      'Authorization': `Basic ${base64Auth}`,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+  };
+}
+
+export async function fetchJiraIssue(ticketKey: string, instance: JiraInstance): Promise<Ticket> {
+  const formattedKey = ticketKey.trim().toUpperCase();
+  const config = getJiraRequestConfig(instance, `/rest/api/3/issue/${formattedKey}`);
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(config.url, {
       method: 'GET',
-      headers: {
-        'Authorization': `Basic ${base64Auth}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
+      headers: config.headers,
     });
   } catch (netErr: any) {
-    throw new Error(`Falha de conexão com o Jira (${cleanDomain}). Verifique se o domínio está correto e se há conexão de internet.`);
+    throw new Error(`Falha de conexão com o Jira (${instance.domain}). Verifique sua conexão de internet.`);
   }
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error(`Ticket "${formattedKey}" não foi encontrado no Jira (${cleanDomain}). Verifique se a chave exata está correta.`);
+      throw new Error(`Ticket "${formattedKey}" não foi encontrado no Jira (${instance.domain}). Verifique se a chave exata está correta.`);
     } else if (response.status === 401 || response.status === 403) {
-      throw new Error(`Autenticação recusada no Jira (${response.status}). Verifique se o E-mail e o API Token da instância "${instance.name}" estão corretos.`);
+      throw new Error(`Autenticação recusada no Jira (${response.status}). Se a sessão expirou, reconecte sua conta Atlassian em Configurações.`);
     }
     throw new Error(`Erro na API do Jira (${response.status}: ${response.statusText})`);
   }
@@ -134,11 +157,6 @@ export async function fetchJiraIssue(ticketKey: string, instance: JiraInstance):
 }
 
 export async function fetchJiraIssuesByJql(jqlOrLink: string, instance: JiraInstance): Promise<Ticket[]> {
-  let cleanDomain = instance.domain.trim().replace(/\/+$/, '');
-  if (!cleanDomain.startsWith('http://') && !cleanDomain.startsWith('https://')) {
-    cleanDomain = `https://${cleanDomain}`;
-  }
-
   let finalJql = jqlOrLink.trim();
 
   // Extract filter ID or JQL param if user pasted a full URL
@@ -163,14 +181,6 @@ export async function fetchJiraIssuesByJql(jqlOrLink: string, instance: JiraInst
 
   const fieldsParam = 'summary,description,status,assignee,reporter,priority,labels,created,updated,comment';
   const encodedJql = encodeURIComponent(finalJql);
-  const authString = `${instance.email.trim()}:${instance.apiToken.trim()}`;
-  const base64Auth = Buffer.from(authString).toString('base64');
-
-  const headers = {
-    'Authorization': `Basic ${base64Auth}`,
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  };
 
   const payloadBody = JSON.stringify({
     jql: finalJql,
@@ -178,18 +188,21 @@ export async function fetchJiraIssuesByJql(jqlOrLink: string, instance: JiraInst
     fields: ['summary', 'description', 'status', 'assignee', 'reporter', 'priority', 'labels', 'created', 'updated', 'comment'],
   });
 
+  const baseConfig = getJiraRequestConfig(instance, '/');
+  const baseUrl = baseConfig.url.replace(/\/+$/, '');
+
   // Candidate API Search Endpoints to try sequentially until success
   const candidateRequests = [
     // Candidate 1: Jira Cloud v3 POST /rest/api/3/search/jql
-    { url: `${cleanDomain}/rest/api/3/search/jql`, method: 'POST', body: payloadBody },
+    { url: `${baseUrl}/rest/api/3/search/jql`, method: 'POST', body: payloadBody },
     // Candidate 2: Jira Cloud v3 GET /rest/api/3/search
-    { url: `${cleanDomain}/rest/api/3/search?jql=${encodedJql}&maxResults=100&fields=${fieldsParam}`, method: 'GET', body: undefined },
+    { url: `${baseUrl}/rest/api/3/search?jql=${encodedJql}&maxResults=100&fields=${fieldsParam}`, method: 'GET', body: undefined },
     // Candidate 3: Jira v2 GET /rest/api/2/search
-    { url: `${cleanDomain}/rest/api/2/search?jql=${encodedJql}&maxResults=100&fields=${fieldsParam}`, method: 'GET', body: undefined },
+    { url: `${baseUrl}/rest/api/2/search?jql=${encodedJql}&maxResults=100&fields=${fieldsParam}`, method: 'GET', body: undefined },
     // Candidate 4: Jira v2 POST /rest/api/2/search
-    { url: `${cleanDomain}/rest/api/2/search`, method: 'POST', body: payloadBody },
+    { url: `${baseUrl}/rest/api/2/search`, method: 'POST', body: payloadBody },
     // Candidate 5: Legacy POST /rest/api/3/search
-    { url: `${cleanDomain}/rest/api/3/search`, method: 'POST', body: payloadBody },
+    { url: `${baseUrl}/rest/api/3/search`, method: 'POST', body: payloadBody },
   ];
 
   let lastResponse: Response | null = null;
@@ -200,7 +213,7 @@ export async function fetchJiraIssuesByJql(jqlOrLink: string, instance: JiraInst
       console.log(`[Jira JQL Search] Testando endpoint: ${candidate.method} ${candidate.url}`);
       const res = await fetch(candidate.url, {
         method: candidate.method,
-        headers,
+        headers: baseConfig.headers,
         body: candidate.body,
       });
 
@@ -223,9 +236,9 @@ export async function fetchJiraIssuesByJql(jqlOrLink: string, instance: JiraInst
     if (status === 400) {
       throw new Error(`A consulta JQL "${finalJql}" contém erros de sintaxe ou campos inválidos no Jira. Verifique nomes de marcas, projetos e status.`);
     } else if (status === 401 || status === 403) {
-      throw new Error(`Autenticação recusada no Jira (${status}). Verifique o E-mail e API Token da instância "${instance.name}".`);
+      throw new Error(`Autenticação recusada no Jira (${status}). Reconecte sua conta Atlassian ou verifique as permissões da instância.`);
     } else if (status === 410) {
-      throw new Error(`A API de Busca JQL do Jira retornou 410 (Descontinuado). Verifique se o API Token possui permissões de leitura no projeto.`);
+      throw new Error(`A API de Busca JQL do Jira retornou 410 (Descontinuado). Verifique as permissões de leitura no projeto.`);
     }
     throw new Error(`Erro na API do Jira (${status}: ${lastResponse ? lastResponse.statusText : ''})`);
   }

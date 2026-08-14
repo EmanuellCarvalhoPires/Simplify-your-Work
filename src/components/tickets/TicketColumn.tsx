@@ -5,16 +5,17 @@ import { Plus } from 'lucide-react';
 
 interface TicketColumnProps {
   title: string;
-  iconSrc: string;
+  iconSrc?: string;
+  accentColor?: string;
   tickets: Ticket[];
   onAddClick: () => void;
   onCardClick: (ticket: Ticket) => void;
-  accentColor?: string;
 }
 
 export const TicketColumn: React.FC<TicketColumnProps> = ({
   title,
   iconSrc,
+  accentColor = '#6366f1',
   tickets,
   onAddClick,
   onCardClick,
@@ -22,9 +23,37 @@ export const TicketColumn: React.FC<TicketColumnProps> = ({
   return (
     <div style={styles.columnContainer}>
       <div style={styles.headerBar}>
-        <div style={styles.titlePill}>
-          <img src={iconSrc} alt={title} style={styles.iconImage} />
+        <div style={{ ...styles.titlePill, borderColor: `${accentColor}40` }}>
+          {iconSrc ? (
+            <img src={iconSrc} alt={title} style={styles.iconImage} />
+          ) : (
+            <span
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                backgroundColor: accentColor,
+                display: 'inline-block',
+                flexShrink: 0,
+                boxShadow: `0 0 10px ${accentColor}80`,
+              }}
+            />
+          )}
           <span style={styles.columnTitle}>{title}</span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: '12px',
+              fontWeight: '700',
+              backgroundColor: `${accentColor}25`,
+              color: accentColor,
+              padding: '2px 8px',
+              borderRadius: '12px',
+              border: `1px solid ${accentColor}40`,
+            }}
+          >
+            {tickets.length}
+          </span>
         </div>
 
         <button
@@ -32,16 +61,16 @@ export const TicketColumn: React.FC<TicketColumnProps> = ({
           style={styles.addButton}
           title={`Adicionar novo em ${title}`}
         >
-          <Plus size={22} color="#ffffff" />
+          <Plus size={18} color="#ffffff" />
         </button>
       </div>
 
       <div style={styles.cardsList}>
         {tickets.length === 0 ? (
           <div style={styles.emptyState}>
-            <p>Nenhum ticket nesta lista.</p>
-            <button onClick={onAddClick} className="btn btn-secondary" style={{ marginTop: '12px' }}>
-              <Plus size={16} /> Adicionar Ticket
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Nenhum ticket nesta coluna.</p>
+            <button onClick={onAddClick} className="btn btn-secondary" style={{ marginTop: '10px', padding: '5px 10px', fontSize: '12px' }}>
+              <Plus size={14} /> Adicionar
             </button>
           </div>
         ) : (
@@ -54,14 +83,16 @@ export const TicketColumn: React.FC<TicketColumnProps> = ({
 
 const styles: Record<string, React.CSSProperties> = {
   columnContainer: {
-    flex: 1,
+    width: '300px',
+    minWidth: '300px',
+    flex: '0 0 300px',
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    borderRadius: '24px',
+    borderRadius: '20px',
     border: '1px solid var(--border-subtle)',
-    padding: '20px',
-    gap: '16px',
+    padding: '16px',
+    gap: '14px',
     height: '100%',
     overflow: 'hidden',
   },

@@ -1,13 +1,50 @@
-import React from 'react';
-import { User } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { User, ChevronDown, UserPlus, Check, Trash2 } from 'lucide-react';
+import type { UserProfile } from '../../types/index';
 
 interface HeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   presetName?: string;
+  activeUser?: UserProfile | null;
+  users?: UserProfile[];
+  onSelectActiveUser?: (id: string) => Promise<void>;
+  onDeleteUser?: (id: string) => Promise<void>;
+  onOpenCreateUserModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ searchQuery, onSearchChange, presetName }) => {
+export const Header: React.FC<HeaderProps> = ({
+  searchQuery,
+  onSearchChange,
+  presetName,
+  activeUser,
+  users = [],
+  onSelectActiveUser,
+  onDeleteUser,
+  onOpenCreateUserModal,
+}) => {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getInitials = (n?: string) => {
+    if (!n) return 'U';
+    const parts = n.trim().split(' ');
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return n[0].toUpperCase();
+  };
+
+  const userAvatarColor = activeUser?.avatarColor || '#6366f1';
+
   return (
     <header style={styles.header}>
       {/* Brand Logo & Title */}
@@ -17,7 +54,6 @@ export const Header: React.FC<HeaderProps> = ({ searchQuery, onSearchChange, pre
           alt="Simplify your Work"
           style={styles.logoImage}
           onError={(e) => {
-            // Fallback to text if image loading fails in dev
             (e.target as HTMLElement).style.display = 'none';
           }}
         />
@@ -38,7 +74,7 @@ export const Header: React.FC<HeaderProps> = ({ searchQuery, onSearchChange, pre
         />
       </div>
 
-      {/* Right Controls (Theme & User Profile Icon) */}
+      {/* Right Controls (Theme & User Profile Dropdown) */}
       <div style={styles.rightSection}>
         {presetName && (
           <div style={styles.themePill}>
@@ -47,9 +83,186 @@ export const Header: React.FC<HeaderProps> = ({ searchQuery, onSearchChange, pre
           </div>
         )}
 
-        {/* User Profile Avatar matching user wireframe */}
-        <div style={styles.profileAvatar} title="Perfil do Usuário (Emanuell Carvalho)">
-          <User size={24} color="#ffffff" />
+        {/* User Profile Pill & Dropdown */}
+        <div ref={dropdownRef} style={{ position: 'relative' }}>
+          <div
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '4px 10px 4px 6px',
+              borderRadius: '24px',
+              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid var(--border-subtle)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            title={activeUser ? `${activeUser.name} (${activeUser.email})` : 'Perfil do Usuário'}
+          >
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                backgroundColor: userAvatarColor,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '800',
+                color: '#ffffff',
+                fontSize: '13px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}
+            >
+              {activeUser?.name ? getInitials(activeUser.name) : <User size={18} />}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#ffffff', lineHeight: '1.2' }}>
+                {activeUser?.name || 'Usuário'}
+              </span>
+              {activeUser?.role && (
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{activeUser.role}</span>
+              )}
+            </div>
+            <ChevronDown size={14} color="var(--text-secondary)" style={{ marginLeft: '4px' }} />
+          </div>
+
+          {/* Dropdown Menu */}
+          {isMenuOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '50px',
+                right: 0,
+                width: '260px',
+                backgroundColor: 'var(--bg-modal)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '16px',
+                padding: '8px',
+                boxShadow: '0 12px 32px rgba(0, 0, 0, 0.5)',
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+              }}
+            >
+              <div style={{ padding: '8px 12px', fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Alternar Usuário Ativo
+              </div>
+
+              {users.map((u) => {
+                const isActive = activeUser?.id === u.id;
+                return (
+                  <div
+                    key={u.id}
+                    onClick={async () => {
+                      if (onSelectActiveUser && !isActive) {
+                        await onSelectActiveUser(u.id);
+                      }
+                      setIsMenuOpen(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.15s ease',
+                    }}
+                    className="hover-bright"
+                  >
+                    <div
+                      style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '50%',
+                        backgroundColor: u.avatarColor || '#6366f1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: '700',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {getInitials(u.name)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '13px', fontWeight: '700', color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {u.name}
+                      </p>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {u.email}
+                      </p>
+                    </div>
+                    {isActive && <Check size={16} color="var(--accent-primary)" />}
+                  </div>
+                );
+              })}
+
+              <div style={{ height: '1px', backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
+
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  if (onOpenCreateUserModal) onOpenCreateUserModal();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  color: 'var(--accent-primary)',
+                  fontWeight: '700',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+                className="hover-bright"
+              >
+                <UserPlus size={16} /> Cadastrar Novo Usuário
+              </button>
+
+              {activeUser && (
+                <button
+                  onClick={async () => {
+                    setIsMenuOpen(false);
+                    if (window.confirm(`Tem certeza que deseja excluir/sair do perfil "${activeUser.name}"?`)) {
+                      if (onDeleteUser) {
+                        await onDeleteUser(activeUser.id);
+                      }
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    color: '#ef4444',
+                    fontWeight: '700',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    marginTop: '2px',
+                  }}
+                  className="hover-bright"
+                >
+                  <Trash2 size={15} /> Sair / Excluir Perfil Atual
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </header>

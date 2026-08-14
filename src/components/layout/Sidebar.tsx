@@ -1,7 +1,7 @@
 import React from 'react';
-import { LayoutGrid, LayoutDashboard, FileText, Bell, Settings } from 'lucide-react';
+import { LayoutGrid, LayoutDashboard, Calendar, FileText, Bell, Settings } from 'lucide-react';
 
-export type NavTab = 'overview' | 'tickets' | 'notes' | 'reminders' | 'settings';
+export type NavTab = 'overview' | 'tickets' | 'calendar' | 'notes' | 'reminders' | 'settings';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -12,6 +12,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
   const navItems = [
     { id: 'overview' as NavTab, label: 'Meu Hub', icon: LayoutGrid },
     { id: 'tickets' as NavTab, label: 'Tickets', icon: LayoutDashboard },
+    { id: 'calendar' as NavTab, label: 'Agenda', icon: Calendar },
     { id: 'notes' as NavTab, label: 'Anotações', icon: FileText },
     { id: 'reminders' as NavTab, label: 'Lembretes', icon: Bell },
   ];

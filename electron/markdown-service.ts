@@ -21,6 +21,13 @@ export function readNoteContent(filePath: string): string {
   if (!fs.existsSync(filePath)) {
     return '';
   }
+  const ext = (filePath.split('.').pop() || '').toLowerCase();
+  const isBinary = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'zip', 'rar', '7z', 'exe', 'bin'].includes(ext) || filePath.includes(path.join('notes', 'files'));
+  
+  if (isBinary) {
+    return '*(Este arquivo é um anexo binário. Utilize o visualizador de arquivos para abri-lo.)*';
+  }
+
   return fs.readFileSync(filePath, 'utf-8');
 }
 
@@ -40,10 +47,17 @@ export async function createNote(title: string): Promise<NoteItem> {
 }
 
 export async function saveNoteContent(filePath: string, title: string, content: string): Promise<NoteItem> {
-  fs.writeFileSync(filePath, content, 'utf-8');
+  const ext = (filePath.split('.').pop() || '').toLowerCase();
+  const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) || filePath.includes(path.join('notes', 'files'));
+
+  if (!isBinaryFile && fs.existsSync(path.dirname(filePath))) {
+    fs.writeFileSync(filePath, content, 'utf-8');
+  }
+
   return await dbSaveNoteMeta({
     title,
     filePath,
+    format: isBinaryFile ? 'file' : undefined,
   });
 }
 
@@ -141,4 +155,86 @@ export async function saveNoteImage(base64Data: string, ext: string): Promise<st
   return base64Data.startsWith('data:image/')
     ? base64Data
     : `data:image/${ext || 'png'};base64,${base64Clean}`;
+}
+
+export async function saveFileNote(fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number }): Promise<NoteItem> {
+  const notesDir = getNotesDir();
+  const filesDir = path.join(notesDir, 'files');
+  if (!fs.existsSync(filesDir)) {
+    fs.mkdirSync(filesDir, { recursive: true });
+  }
+
+  const ext = (fileData.fileName.split('.').pop() || '').toLowerCase();
+  const sanitized = fileData.fileName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+  const diskFileName = `${Date.now()}_${sanitized}`;
+  const diskPath = path.join(filesDir, diskFileName);
+
+  // Write file buffer to disk permanently in app data folder
+  const buffer = Buffer.from(fileData.base64, 'base64');
+  fs.writeFileSync(diskPath, buffer);
+
+  let fileType: NoteItem['fileType'] = 'other';
+  if (ext === 'pdf') fileType = 'pdf';
+  else if (ext === 'docx' || ext === 'doc') fileType = 'docx';
+  else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
+  else if (ext === 'csv') fileType = 'csv';
+  else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) fileType = 'image';
+  else if (['txt', 'json', 'log', 'md', 'html'].includes(ext)) fileType = 'text';
+
+  return await dbSaveNoteMeta({
+    title: fileData.title || fileData.fileName,
+    filePath: diskPath,
+    format: 'file',
+    fileType,
+    originalFileName: fileData.fileName,
+    fileSize: fileData.size,
+    mimeType: fileData.mimeType,
+  });
+}
+
+export async function pickLocalFile(): Promise<{ filePath: string; fileName: string; mimeType: string; base64: string; size: number } | null> {
+  const win = BrowserWindow.getFocusedWindow();
+  const { filePaths, canceled } = await dialog.showOpenDialog(win || {}, {
+    title: 'Selecionar Arquivo para Anexar às Anotações',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Todos os Documentos (*.pdf, *.docx, *.xlsx, *.csv, imagens)', extensions: ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'log', 'json', 'md'] },
+      { name: 'Documentos PDF (*.pdf)', extensions: ['pdf'] },
+      { name: 'Documentos Word (*.docx, *.doc)', extensions: ['docx', 'doc'] },
+      { name: 'Planilhas Excel & CSV (*.xlsx, *.xls, *.csv)', extensions: ['xlsx', 'xls', 'csv'] },
+      { name: 'Imagens (*.png, *.jpg, *.jpeg, *.webp)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif'] },
+      { name: 'Todos os Arquivos (*.*)', extensions: ['*'] },
+    ],
+  });
+
+  if (canceled || !filePaths || filePaths.length === 0) return null;
+
+  const targetPath = filePaths[0];
+  const stat = fs.statSync(targetPath);
+  const fileName = path.basename(targetPath);
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+
+  let mimeType = 'application/octet-stream';
+  if (ext === 'pdf') mimeType = 'application/pdf';
+  else if (ext === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  else if (ext === 'doc') mimeType = 'application/msword';
+  else if (ext === 'xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  else if (ext === 'xls') mimeType = 'application/vnd.ms-excel';
+  else if (ext === 'csv') mimeType = 'text/csv';
+  else if (ext === 'png') mimeType = 'image/png';
+  else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+  else if (ext === 'webp') mimeType = 'image/webp';
+  else if (ext === 'svg') mimeType = 'image/svg+xml';
+  else if (['txt', 'json', 'log', 'md'].includes(ext)) mimeType = 'text/plain';
+
+  const buffer = fs.readFileSync(targetPath);
+  const base64 = buffer.toString('base64');
+
+  return {
+    filePath: targetPath,
+    fileName,
+    mimeType,
+    base64,
+    size: stat.size,
+  };
 }

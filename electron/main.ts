@@ -21,6 +21,12 @@ import {
   dbSaveReminder,
   dbDeleteReminder,
   dbGetNotes,
+  dbGetUsers,
+  dbGetActiveUser,
+  dbSetActiveUser,
+  dbSaveUser,
+  dbDeleteUser,
+  dbSaveActiveUserTheme,
 } from './database';
 import { fetchJiraIssue, fetchJiraIssuesByJql } from './jira-service';
 import {
@@ -28,11 +34,15 @@ import {
   saveNoteContent,
   createNote,
   createRichNote,
+  saveFileNote,
+  pickLocalFile,
   deleteNote,
   exportNoteAsTxt,
   saveNoteImage,
 } from './markdown-service';
 import { startReminderScheduler, triggerNotification } from './scheduler';
+import { startAtlassianOAuthFlow, cancelActiveOAuthFlow } from './oauth-service';
+import { syncIcsCalendar, getCachedEvents, getCalendarUrl, setCalendarUrl } from './calendar-service';
 import type { ThemeConfig } from '../src/types/index';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -174,52 +184,37 @@ function registerIpcHandlers() {
     const existingTickets = await dbGetTickets();
 
     const savedTickets: Ticket[] = [];
+    const existingKeys: string[] = [];
     let newCount = 0;
-    let updatedCount = 0;
 
     for (const fresh of fetchedTickets) {
-      const existing = existingTickets.find((t) => t.id === fresh.id);
+      const freshKey = (fresh.key || '').trim().toUpperCase();
+      const existing = existingTickets.find((t) => {
+        const tKey = (t.key || '').trim().toUpperCase();
+        return (freshKey && tKey === freshKey) || t.id === fresh.id || (freshKey && t.id.toUpperCase().includes(`_${freshKey}_`));
+      });
 
       if (existing) {
-        // Merge comments: keep local comments from existing ticket, add fresh Jira comments
-        const localComments = (existing.comments || []).filter(
-          (c) => c.isLocal || (c.id && String(c.id).startsWith('comm_'))
-        );
-        const jiraComments = fresh.comments || [];
-        const combinedCommentsMap = new Map();
-
-        jiraComments.forEach((c) => combinedCommentsMap.set(c.id, c));
-        localComments.forEach((c) => combinedCommentsMap.set(c.id, c));
-
-        const mergedComments = Array.from(combinedCommentsMap.values()).sort(
-          (a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()
-        );
-
-        const mergedLinkedTicketIds = Array.from(
-          new Set([...(existing.linkedTicketIds || []), ...(fresh.linkedTicketIds || [])])
-        );
-        const mergedLinkedNoteIds = Array.from(
-          new Set([...(existing.linkedNoteIds || []), ...(fresh.linkedNoteIds || [])])
-        );
-
-        const mergedTicket: Ticket = {
-          ...fresh,
-          comments: mergedComments,
-          linkedTicketIds: mergedLinkedTicketIds,
-          linkedNoteIds: mergedLinkedNoteIds,
-        };
-
-        const saved = await dbSaveTicket(mergedTicket);
-        savedTickets.push(saved);
-        updatedCount++;
+        // Ticket already exists in app - do not create new ticket!
+        const keyName = freshKey || existing.key || fresh.id;
+        if (!existingKeys.includes(keyName)) {
+          existingKeys.push(keyName);
+        }
       } else {
+        // New ticket - save it
         const saved = await dbSaveTicket(fresh);
         savedTickets.push(saved);
         newCount++;
       }
     }
 
-    return { tickets: savedTickets, newCount, updatedCount };
+    return {
+      tickets: savedTickets,
+      newCount,
+      updatedCount: 0,
+      existingCount: existingKeys.length,
+      existingKeys,
+    };
   });
 
   // === SAVED JQL QUERIES ===
@@ -287,6 +282,10 @@ function registerIpcHandlers() {
     return await createRichNote(title);
   });
 
+  ipcMain.handle('notes:saveFileNote', async (_, fileData) => {
+    return await saveFileNote(fileData);
+  });
+
   ipcMain.handle('notes:saveImage', async (_, { base64Data, ext }) => {
     return await saveNoteImage(base64Data, ext);
   });
@@ -299,9 +298,74 @@ function registerIpcHandlers() {
     return await exportNoteAsTxt(content, defaultFileName);
   });
 
+  // === ATLASSIAN OAUTH ===
+  ipcMain.handle('jira:getOAuthClientId', async () => {
+    return (store.get('atlassian_client_id') as string) || '';
+  });
+
+  ipcMain.handle('jira:saveOAuthClientId', async (_, clientId: string) => {
+    store.set('atlassian_client_id', clientId.trim());
+    return true;
+  });
+
+  ipcMain.handle('jira:getOAuthClientSecret', async () => {
+    return (store.get('atlassian_client_secret') as string) || '';
+  });
+
+  ipcMain.handle('jira:saveOAuthClientSecret', async (_, clientSecret: string) => {
+    store.set('atlassian_client_secret', clientSecret.trim());
+    return true;
+  });
+
+  ipcMain.handle('jira:getOAuthProxyUrl', async () => {
+    return (store.get('atlassian_proxy_url') as string) || '';
+  });
+
+  ipcMain.handle('jira:saveOAuthProxyUrl', async (_, proxyUrl: string) => {
+    store.set('atlassian_proxy_url', proxyUrl.trim());
+    return true;
+  });
+
+  ipcMain.handle('jira:startOAuth', async (_, customClientId?: string, customClientSecret?: string, customProxyUrl?: string) => {
+    const savedClientId = (store.get('atlassian_client_id') as string) || '';
+    const savedClientSecret = (store.get('atlassian_client_secret') as string) || '';
+    const savedProxyUrl = (store.get('atlassian_proxy_url') as string) || '';
+    return await startAtlassianOAuthFlow(customClientId, savedClientId, customClientSecret, savedClientSecret, customProxyUrl, savedProxyUrl);
+  });
+
+  ipcMain.handle('jira:cancelOAuth', async () => {
+    return cancelActiveOAuthFlow();
+  });
+
   // === THEME ===
-  ipcMain.handle('theme:get', () => {
-    return (store.get('themeConfig') as ThemeConfig) || defaultTheme;
+  ipcMain.handle('theme:get', async () => {
+    const activeUser = await dbGetActiveUser();
+    return activeUser?.themeConfig || (store.get('themeConfig') as ThemeConfig) || defaultTheme;
+  });
+
+  ipcMain.handle('theme:save', async (_, theme: ThemeConfig) => {
+    return await dbSaveActiveUserTheme(theme);
+  });
+
+  // === USER PROFILES ===
+  ipcMain.handle('users:get', async () => {
+    return await dbGetUsers();
+  });
+
+  ipcMain.handle('users:getActive', async () => {
+    return await dbGetActiveUser();
+  });
+
+  ipcMain.handle('users:setActive', async (_, id: string) => {
+    return await dbSetActiveUser(id);
+  });
+
+  ipcMain.handle('users:save', async (_, user: any) => {
+    return await dbSaveUser(user);
+  });
+
+  ipcMain.handle('users:delete', async (_, id: string) => {
+    return await dbDeleteUser(id);
   });
 
   // === SYSTEM ===
@@ -312,20 +376,122 @@ function registerIpcHandlers() {
     }
     return false;
   });
+
+  ipcMain.handle('system:readLocalFile', async (_, filePath: string) => {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Arquivo não encontrado no caminho: ${filePath}`);
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileName = path.basename(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+
+    let mimeType = 'application/octet-stream';
+    if (ext === '.pdf') mimeType = 'application/pdf';
+    else if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+    else if (ext === '.gif') mimeType = 'image/gif';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    else if (ext === '.svg') mimeType = 'image/svg+xml';
+    else if (ext === '.docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    else if (ext === '.doc') mimeType = 'application/msword';
+    else if (ext === '.xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    else if (ext === '.xls') mimeType = 'application/vnd.ms-excel';
+    else if (ext === '.csv') mimeType = 'text/csv';
+    else if (ext === '.txt' || ext === '.log' || ext === '.json' || ext === '.md' || ext === '.html' || ext === '.js' || ext === '.ts') {
+      mimeType = 'text/plain';
+    }
+
+    const buffer = fs.readFileSync(filePath);
+    const base64 = buffer.toString('base64');
+    let text: string | undefined = undefined;
+
+    if (mimeType.startsWith('text/') || ext === '.csv' || ext === '.json' || ext === '.md') {
+      text = buffer.toString('utf-8');
+    }
+
+    return {
+      mimeType,
+      base64,
+      text,
+      fileName,
+      size: stat.size,
+    };
+  });
+
+  ipcMain.handle('system:pickLocalFile', async () => {
+    return await pickLocalFile();
+  });
+
+  // === CALENDAR / ICS ===
+  ipcMain.handle('calendar:sync', async (_, customUrl?: string) => {
+    return await syncIcsCalendar(customUrl);
+  });
+
+  ipcMain.handle('calendar:getEvents', async () => {
+    return getCachedEvents();
+  });
+
+  ipcMain.handle('calendar:getUrl', async () => {
+    return getCalendarUrl();
+  });
+
+  ipcMain.handle('calendar:setUrl', async (_, url: string) => {
+    return setCalendarUrl(url);
+  });
+
+  // === LEGAL DOCS ===
+  ipcMain.handle('system:getLegalDocs', async () => {
+    const baseDir = app.getAppPath();
+    const termsPath = path.join(baseDir, 'registrosMarkdown', 'termos_de_uso.md');
+    const privacyPath = path.join(baseDir, 'registrosMarkdown', 'politica_de_privacidade.md');
+
+    let termsContent = '';
+    let privacyContent = '';
+
+    if (fs.existsSync(termsPath)) {
+      termsContent = fs.readFileSync(termsPath, 'utf-8');
+    }
+    if (fs.existsSync(privacyPath)) {
+      privacyContent = fs.readFileSync(privacyPath, 'utf-8');
+    }
+
+    return { termsContent, privacyContent };
+  });
 }
 
-app.whenReady().then(async () => {
-  await initDatabase();
-  registerIpcHandlers();
-  startReminderScheduler();
-  createWindow();
+// Single Instance Lock
+const gotTheLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
-});
+
+  app.whenReady().then(async () => {
+    await initDatabase();
+    registerIpcHandlers();
+    startReminderScheduler();
+    createWindow();
+
+    // Auto-sync Microsoft Outlook ICS Calendar and 30-min reminders in background
+    setTimeout(() => {
+      syncIcsCalendar().catch((err) => console.error('[Auto Sync Calendar Error]:', err));
+    }, 3000);
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
 
 app.on('before-quit', async () => {
   try {

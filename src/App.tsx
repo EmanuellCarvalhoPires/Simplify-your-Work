@@ -6,8 +6,12 @@ import { UnifiedHub } from './components/hub/UnifiedHub';
 import { TicketBoard } from './components/tickets/TicketBoard';
 import { ReminderManager } from './components/reminders/ReminderManager';
 import { NoteEditor } from './components/notes/NoteEditor';
+import { CalendarView } from './components/calendar/CalendarView';
 import { SettingsView } from './components/settings/SettingsView';
-import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus } from './types/index';
+import { FileViewerModal } from './components/common/FileViewerModal';
+import { UserModal } from './components/common/UserModal';
+import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile } from './types/index';
+import { DEFAULT_THEME } from './types/index';
 
 class ViewErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -96,8 +100,36 @@ export default function App() {
     }
   });
 
-  const [themeConfig, setThemeConfig] = useState<ThemeConfig | null>(null);
+  const [themeConfig, setThemeConfig] = useState<ThemeConfig>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_theme');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.bgMain) return parsed;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return DEFAULT_THEME;
+  });
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [activeUser, setActiveUser] = useState<UserProfile | null>(null);
+  const [userModalState, setUserModalState] = useState<{ isOpen: boolean; userToEdit?: UserProfile | null }>({
+    isOpen: false,
+    userToEdit: null,
+  });
   const [isInitializing, setIsInitializing] = useState(true);
+  const [activeViewerFile, setActiveViewerFile] = useState<string | null>(null);
+
+  useEffect(() => {
+    applyThemeToCss(themeConfig);
+  }, []);
+
+  useEffect(() => {
+    (window as any).openFileViewer = (filePath: string) => {
+      setActiveViewerFile(filePath);
+    };
+  }, []);
 
   // Load from MongoDB/Backend when available
   useEffect(() => {
@@ -140,9 +172,27 @@ export default function App() {
             localStorage.setItem('simplify_notes', JSON.stringify(safeN));
           }
 
-          if (theme) {
+          // Users sync
+          if (window.electronAPI.getUsers && window.electronAPI.getActiveUser) {
+            const [uList, actU] = await Promise.all([
+              window.electronAPI.getUsers(),
+              window.electronAPI.getActiveUser(),
+            ]);
+            if (uList && uList.length > 0) setUsers(uList);
+            if (actU) {
+              setActiveUser(actU);
+              if (actU.themeConfig && actU.themeConfig.bgMain) {
+                setThemeConfig(actU.themeConfig);
+                localStorage.setItem('simplify_theme', JSON.stringify(actU.themeConfig));
+                applyThemeToCss(actU.themeConfig);
+              }
+            }
+          } else if (theme && theme.bgMain) {
             setThemeConfig(theme);
+            localStorage.setItem('simplify_theme', JSON.stringify(theme));
             applyThemeToCss(theme);
+          } else {
+            applyThemeToCss(themeConfig);
           }
         } catch (err) {
           console.error('Erro ao sincronizar com backend MongoDB:', err);
@@ -184,12 +234,24 @@ export default function App() {
             due = true;
           }
         } else if ((r.recurrence === 'DAILY' || r.recurrence === 'ONCE') && r.scheduledTime) {
-          const [th, tm] = r.scheduledTime.split(':').map(Number);
-          if (!isNaN(th) && !isNaN(tm)) {
-            const scheduledDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0, 0);
-            if (now >= scheduledDate && (!last || last < scheduledDate)) {
-              due = true;
+          let scheduledDate: Date | null = null;
+          if (r.scheduledTime.includes('T') || r.scheduledTime.includes('-')) {
+            const parsed = new Date(r.scheduledTime);
+            if (!isNaN(parsed.getTime())) scheduledDate = parsed;
+          }
+          if (!scheduledDate) {
+            const timeMatch = r.scheduledTime.match(/(\d{1,2}):(\d{2})/);
+            if (timeMatch) {
+              const th = parseInt(timeMatch[1], 10);
+              const tm = parseInt(timeMatch[2], 10);
+              if (!isNaN(th) && !isNaN(tm)) {
+                scheduledDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0, 0);
+              }
             }
+          }
+
+          if (scheduledDate && now >= scheduledDate && (!last || last < scheduledDate)) {
+            due = true;
           }
         }
 
@@ -198,7 +260,7 @@ export default function App() {
           if (window.electronAPI && window.electronAPI.testReminder) {
             await window.electronAPI.testReminder(r);
           } else if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(`⏰ ${r.title}`, { body: r.message, icon: './assets/app-icon.png' });
+            new Notification(`⏰ ${r.title}`, { body: r.message || r.title || 'Lembrete agendado', icon: './assets/app-icon.png' });
           }
           await handleSaveReminder({
             ...r,
@@ -497,6 +559,24 @@ export default function App() {
     return handleCreateNote(title);
   };
 
+  const handleSaveFileNote = async (fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number }) => {
+    if (window.electronAPI?.saveFileNote) {
+      const created = await window.electronAPI.saveFileNote(fileData);
+      setNotes((prev) => [created, ...prev.filter((n) => n.id !== created.id)]);
+      return created;
+    }
+    const created: NoteItem = {
+      id: `file_${Date.now()}`,
+      title: fileData.title || fileData.fileName,
+      filePath: fileData.fileName,
+      format: 'file',
+      fileType: 'other',
+      updatedAt: new Date().toISOString(),
+    };
+    setNotes((prev) => [created, ...prev]);
+    return created;
+  };
+
   const handleReadNoteContent = async (filePath: string) => {
     if (window.electronAPI) {
       return await window.electronAPI.readNoteContent(filePath);
@@ -551,11 +631,65 @@ export default function App() {
     return true;
   };
 
+  // User Profile Handlers
+  const handleSelectActiveUser = async (id: string) => {
+    if (window.electronAPI?.setActiveUser) {
+      const updatedActive = await window.electronAPI.setActiveUser(id);
+      if (updatedActive) {
+        setActiveUser(updatedActive);
+        if (updatedActive.themeConfig && updatedActive.themeConfig.bgMain) {
+          setThemeConfig(updatedActive.themeConfig);
+          localStorage.setItem('simplify_theme', JSON.stringify(updatedActive.themeConfig));
+          applyThemeToCss(updatedActive.themeConfig);
+        }
+      }
+    }
+  };
+
+  const handleSaveUser = async (userPartial: Partial<UserProfile>) => {
+    if (window.electronAPI?.saveUser) {
+      const saved = await window.electronAPI.saveUser(userPartial);
+      const allUsers = await window.electronAPI.getUsers();
+      setUsers(allUsers);
+      if (!activeUser || activeUser.id === saved.id) {
+        setActiveUser(saved);
+        if (saved.themeConfig && saved.themeConfig.bgMain) {
+          setThemeConfig(saved.themeConfig);
+          localStorage.setItem('simplify_theme', JSON.stringify(saved.themeConfig));
+          applyThemeToCss(saved.themeConfig);
+        }
+      }
+    }
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (window.electronAPI?.deleteUser) {
+      await window.electronAPI.deleteUser(id);
+      const [allUsers, actU] = await Promise.all([
+        window.electronAPI.getUsers(),
+        window.electronAPI.getActiveUser(),
+      ]);
+      setUsers(allUsers);
+      if (actU) {
+        setActiveUser(actU);
+        if (actU.themeConfig && actU.themeConfig.bgMain) {
+          setThemeConfig(actU.themeConfig);
+          localStorage.setItem('simplify_theme', JSON.stringify(actU.themeConfig));
+          applyThemeToCss(actU.themeConfig);
+        }
+      }
+    }
+  };
+
   // Handler for Theme Settings
   const handleSaveThemeSettings = async (theme: ThemeConfig) => {
     setThemeConfig(theme);
+    localStorage.setItem('simplify_theme', JSON.stringify(theme));
     applyThemeToCss(theme);
-    if (window.electronAPI) {
+    if (activeUser) {
+      setActiveUser({ ...activeUser, themeConfig: theme });
+    }
+    if (window.electronAPI?.saveThemeSettings) {
       await window.electronAPI.saveThemeSettings(theme);
     }
   };
@@ -578,6 +712,11 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           presetName={themeConfig?.presetName}
+          activeUser={activeUser}
+          users={users}
+          onSelectActiveUser={handleSelectActiveUser}
+          onDeleteUser={handleDeleteUser}
+          onOpenCreateUserModal={() => setUserModalState({ isOpen: true, userToEdit: null })}
         />
 
         <main style={styles.viewContent}>
@@ -613,11 +752,16 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'calendar' && (
+              <CalendarView />
+            )}
+
             {activeTab === 'notes' && (
               <NoteEditor
                 notes={notes}
                 onCreateNote={handleCreateNote}
                 onCreateRichNote={handleCreateRichNote}
+                onSaveFileNote={handleSaveFileNote}
                 onReadContent={handleReadNoteContent}
                 onSaveContent={handleSaveNoteContent}
                 onDeleteNote={handleDeleteNote}
@@ -640,12 +784,34 @@ export default function App() {
                 onSaveJiraInstance={handleSaveJiraInstance}
                 onDeleteJiraInstance={handleDeleteJiraInstance}
                 themeConfig={themeConfig}
-                onSaveThemeConfig={handleSaveThemeSettings}
+                onSaveThemeSettings={handleSaveThemeSettings}
+                activeUser={activeUser}
+                users={users}
+                onSelectActiveUser={handleSelectActiveUser}
+                onSaveUser={handleSaveUser}
+                onDeleteUser={handleDeleteUser}
+                onOpenCreateUserModal={() => setUserModalState({ isOpen: true, userToEdit: null })}
+                onOpenEditUserModal={(u) => setUserModalState({ isOpen: true, userToEdit: u })}
               />
             )}
           </ViewErrorBoundary>
         </main>
       </div>
+
+      {activeViewerFile && (
+        <FileViewerModal
+          filePath={activeViewerFile}
+          onClose={() => setActiveViewerFile(null)}
+        />
+      )}
+
+      {userModalState.isOpen && (
+        <UserModal
+          userToEdit={userModalState.userToEdit}
+          onSave={handleSaveUser}
+          onClose={() => setUserModalState({ isOpen: false, userToEdit: null })}
+        />
+      )}
     </div>
   );
 }

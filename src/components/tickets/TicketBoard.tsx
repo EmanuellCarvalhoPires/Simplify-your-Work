@@ -38,8 +38,14 @@ interface ToastNotice {
   message: string;
 }
 
+
 type SortField = 'work' | 'labels' | 'status' | 'dueDate' | 'priority' | 'assignee';
 type SortOrder = 'asc' | 'desc';
+
+export interface SortRule {
+  field: SortField;
+  order: SortOrder;
+}
 
 export const TicketBoard: React.FC<TicketBoardProps> = ({
   tickets = [],
@@ -53,16 +59,15 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
   onDeleteTicket,
   onOpenSettings,
 }) => {
-  const [viewMode, setViewMode] = useState<'KANBAN' | 'TABLE'>('KANBAN');
+  const [viewMode, setViewMode] = useState<'TABLE' | 'KANBAN'>('TABLE');
   const [isJiraModalOpen, setIsJiraModalOpen] = useState(false);
   const [isLocalModalOpen, setIsLocalModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [toastNotice, setToastNotice] = useState<ToastNotice | null>(null);
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
 
-  // Sorting State (Default: Status Order 1 to 6)
-  const [sortField, setSortField] = useState<SortField>('status');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  // Sorting State (Default: Status Order 1)
+  const [sortRules, setSortRules] = useState<SortRule[]>([{ field: 'status', order: 'asc' }]);
 
   // Filters State
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>('ALL');
@@ -122,21 +127,13 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     return true;
   });
 
-  // Interactive Column Sorting with Requested Status Priority Order
-  const sortedFilteredTickets = [...finalFilteredTickets].sort((a, b) => {
-    let valA: any = '';
-    let valB: any = '';
-
-    switch (sortField) {
+  const getFieldValue = (ticket: Ticket, field: SortField) => {
+    switch (field) {
       case 'work':
-        valA = (a.key || a.title || '').toLowerCase();
-        valB = (b.key || b.title || '').toLowerCase();
-        break;
+        return (ticket.key || ticket.title || '').toLowerCase();
       case 'labels':
-        valA = a.labels && a.labels.length > 0 ? a.labels[0].toLowerCase() : 'zzz';
-        valB = b.labels && b.labels.length > 0 ? b.labels[0].toLowerCase() : 'zzz';
-        break;
-      case 'status':
+        return ticket.labels && ticket.labels.length > 0 ? ticket.labels[0].toLowerCase() : 'zzz';
+      case 'status': {
         const statusOrder: Record<string, number> = {
           IN_PROGRESS: 1,
           NEXT: 2,
@@ -145,14 +142,11 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
           BACKLOG: 5,
           DONE: 6,
         };
-        valA = statusOrder[a.status] || 99;
-        valB = statusOrder[b.status] || 99;
-        break;
+        return statusOrder[ticket.status] || 99;
+      }
       case 'dueDate':
-        valA = a.dueDate ? new Date(a.dueDate).getTime() : a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        valB = b.dueDate ? new Date(b.dueDate).getTime() : b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        break;
-      case 'priority':
+        return ticket.dueDate ? new Date(ticket.dueDate).getTime() : ticket.updatedAt ? new Date(ticket.updatedAt).getTime() : 0;
+      case 'priority': {
         const priorityOrder = (p?: string) => {
           const str = (p || '').toLowerCase();
           if (str.includes('urgente') || str.includes('alta') || str.includes('high')) return 1;
@@ -160,37 +154,90 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
           if (str.includes('baixa') || str.includes('low')) return 3;
           return 4;
         };
-        valA = priorityOrder(a.priority);
-        valB = priorityOrder(b.priority);
-        break;
+        return priorityOrder(ticket.priority);
+      }
       case 'assignee':
-        valA = (a.assignee || '').toLowerCase();
-        valB = (b.assignee || '').toLowerCase();
-        break;
+        return (ticket.assignee || '').toLowerCase();
       default:
-        return 0;
-    }
-
-    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortOrder('asc');
+        return '';
     }
   };
 
+  const compareByRule = (a: Ticket, b: Ticket, rule: SortRule) => {
+    const valA = getFieldValue(a, rule.field);
+    const valB = getFieldValue(b, rule.field);
+
+    if (valA < valB) return rule.order === 'asc' ? -1 : 1;
+    if (valA > valB) return rule.order === 'asc' ? 1 : -1;
+    return 0;
+  };
+
+  // Interactive Multi-Column Sorting (Primary & Secondary Sort)
+  const sortedFilteredTickets = [...finalFilteredTickets].sort((a, b) => {
+    for (const rule of sortRules) {
+      const res = compareByRule(a, b, rule);
+      if (res !== 0) return res;
+    }
+    return 0;
+  });
+
+  const handleSort = (field: SortField, e?: React.MouseEvent) => {
+    setSortRules((prevRules) => {
+      const existingIndex = prevRules.findIndex((r) => r.field === field);
+
+      // Toggle direction of existing active sort column
+      if (existingIndex !== -1) {
+        const updated = [...prevRules];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          order: updated[existingIndex].order === 'asc' ? 'desc' : 'asc',
+        };
+        return updated;
+      }
+
+      // If we currently have less than 2 sort rules active:
+      // Append as 2ª Ordem
+      if (prevRules.length < 2) {
+        return [...prevRules, { field, order: 'asc' }];
+      }
+
+      // If 2 rules are already active, clicking an unsorted column replaces 2ª Ordem
+      return [prevRules[0], { field, order: 'asc' }];
+    });
+  };
+
+  const handleRemoveSort = (field: SortField, e: React.MouseEvent) => {
+    e.preventDefault();
+    setSortRules((prevRules) => prevRules.filter((r) => r.field !== field));
+  };
+
   const renderSortIcon = (field: SortField) => {
-    if (sortField !== field) return null;
-    return sortOrder === 'asc' ? (
-      <ArrowUp size={12} color="#38bdf8" style={{ marginLeft: '4px' }} />
-    ) : (
-      <ArrowDown size={12} color="#38bdf8" style={{ marginLeft: '4px' }} />
+    const index = sortRules.findIndex((r) => r.field === field);
+    if (index === -1) return null;
+
+    const rule = sortRules[index];
+    const isPrimary = index === 0;
+
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '2px',
+          marginLeft: '6px',
+          padding: '1px 5px',
+          borderRadius: '4px',
+          fontSize: '10px',
+          fontWeight: '700',
+          backgroundColor: isPrimary ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+          color: isPrimary ? '#38bdf8' : '#c084fc',
+          border: `1px solid ${isPrimary ? 'rgba(56, 189, 248, 0.3)' : 'rgba(168, 85, 247, 0.3)'}`,
+        }}
+        title={`${isPrimary ? '1ª Ordem' : '2ª Ordem'} (${rule.order === 'asc' ? 'Crescente' : 'Decrescente'})`}
+      >
+        <span>{isPrimary ? '1º' : '2º'}</span>
+        {rule.order === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
+      </span>
     );
   };
 
@@ -355,12 +402,49 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
           </div>
         </div>
 
-        {/* View Mode Switcher Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* View Mode Switcher Buttons & Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <button
+            className="btn"
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              backgroundColor: 'rgba(139, 92, 246, 0.2)',
+              color: '#c084fc',
+              border: '1px solid rgba(139, 92, 246, 0.4)',
+              fontWeight: '700',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              height: '34px',
+              transition: 'all 0.2s ease',
+            }}
+            onClick={() => setIsLocalModalOpen(true)}
+            title="Criar uma nova tarefa local"
+          >
+            <Plus size={15} /> Criar Tarefa
+          </button>
+
           <button
             className="btn btn-primary"
-            style={{ padding: '6px 12px', fontSize: '13px' }}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              height: '34px',
+            }}
             onClick={() => setIsJiraModalOpen(true)}
+            title="Puxar ou atualizar um ticket via chave do Jira"
           >
             <Plus size={15} /> Puxar do Jira
           </button>
@@ -369,47 +453,50 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             <button
               style={{
                 ...styles.toggleBtn,
-                ...(viewMode === 'KANBAN' ? styles.activeToggleBtn : {}),
+                ...(viewMode === 'TABLE' ? styles.activeToggleBtn : {}),
               }}
-              onClick={() => setViewMode('KANBAN')}
-              title="Visualização em Colunas Kanban"
+              onClick={() => setViewMode('TABLE')}
+              title="Visualização em Tabela de Lista"
             >
-              <LayoutGrid size={15} /> Kanban
+              <TableIcon size={15} /> Lista
             </button>
             <button
               style={{
                 ...styles.toggleBtn,
-                ...(viewMode === 'TABLE' ? styles.activeToggleBtn : {}),
+                ...(viewMode === 'KANBAN' ? styles.activeToggleBtn : {}),
               }}
-              onClick={() => setViewMode('TABLE')}
-              title="Visualização em Tabela Jira (Data Table)"
+              onClick={() => setViewMode('KANBAN')}
+              title="Visualização em Colunas Kanban por Status"
             >
-              <TableIcon size={15} /> Tabela
+              <LayoutGrid size={15} /> Kanban
             </button>
           </div>
         </div>
       </div>
 
-      {/* Render Kanban View OR Data Table View */}
+      {/* Render Data Table View OR 6-Status Kanban Board */}
       {viewMode === 'KANBAN' ? (
         <div style={styles.boardContainer}>
-          <TicketColumn
-            title="Tickets Atlassian"
-            iconSrc="./assets/jira-badge.png"
-            tickets={jiraTickets}
-            onAddClick={() => setIsJiraModalOpen(true)}
-            onCardClick={(t) => setSelectedTicket(t)}
-            accentColor="#0284c7"
-          />
-
-          <TicketColumn
-            title="Tickets do App"
-            iconSrc="./assets/app-badge.png"
-            tickets={localTickets}
-            onAddClick={() => setIsLocalModalOpen(true)}
-            onCardClick={(t) => setSelectedTicket(t)}
-            accentColor="#8b5cf6"
-          />
+          {[
+            { status: 'IN_PROGRESS' as const, label: 'Em Andamento', color: '#3b82f6' },
+            { status: 'NEXT' as const, label: 'Fazer em Seguida', color: '#f59e0b' },
+            { status: 'TO_DO' as const, label: 'A Fazer', color: '#06b6d4' },
+            { status: 'WAITING_CLIENT' as const, label: 'Aguardando Cliente', color: '#ec4899' },
+            { status: 'BACKLOG' as const, label: 'Backlog', color: '#64748b' },
+            { status: 'DONE' as const, label: 'Concluído', color: '#10b981' },
+          ].map((col) => {
+            const colTickets = sortedFilteredTickets.filter((t) => t.status === col.status);
+            return (
+              <TicketColumn
+                key={col.status}
+                title={col.label}
+                tickets={colTickets}
+                accentColor={col.color}
+                onAddClick={() => setIsLocalModalOpen(true)}
+                onCardClick={(t) => setSelectedTicket(t)}
+              />
+            );
+          })}
         </div>
       ) : (
         /* Modern Jira Data Table View (With Clickable Column Sorting) */
@@ -418,22 +505,52 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             <table style={styles.dataTable}>
               <thead>
                 <tr>
-                  <th style={{ ...styles.thCellSortable, minWidth: '320px' }} onClick={() => handleSort('work')} title="Ordenar por Chamado/Título">
+                  <th
+                    style={{ ...styles.thCellSortable, minWidth: '320px' }}
+                    onClick={(e) => handleSort('work', e)}
+                    onContextMenu={(e) => handleRemoveSort('work', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Work {renderSortIcon('work')}
                   </th>
-                  <th style={{ ...styles.thCellSortable, width: '130px' }} onClick={() => handleSort('labels')} title="Ordenar por Label">
+                  <th
+                    style={{ ...styles.thCellSortable, width: '130px' }}
+                    onClick={(e) => handleSort('labels', e)}
+                    onContextMenu={(e) => handleRemoveSort('labels', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Labels {renderSortIcon('labels')}
                   </th>
-                  <th style={{ ...styles.thCellSortable, width: '150px' }} onClick={() => handleSort('status')} title="Ordenar por Status">
+                  <th
+                    style={{ ...styles.thCellSortable, width: '150px' }}
+                    onClick={(e) => handleSort('status', e)}
+                    onContextMenu={(e) => handleRemoveSort('status', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Status {renderSortIcon('status')}
                   </th>
-                  <th style={{ ...styles.thCellSortable, width: '130px' }} onClick={() => handleSort('dueDate')} title="Ordenar por Data">
+                  <th
+                    style={{ ...styles.thCellSortable, width: '130px' }}
+                    onClick={(e) => handleSort('dueDate', e)}
+                    onContextMenu={(e) => handleRemoveSort('dueDate', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Due date {renderSortIcon('dueDate')}
                   </th>
-                  <th style={{ ...styles.thCellSortable, width: '140px' }} onClick={() => handleSort('priority')} title="Ordenar por Complexidade/Prioridade">
+                  <th
+                    style={{ ...styles.thCellSortable, width: '140px' }}
+                    onClick={(e) => handleSort('priority', e)}
+                    onContextMenu={(e) => handleRemoveSort('priority', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Complexidade {renderSortIcon('priority')}
                   </th>
-                  <th style={{ ...styles.thCellSortable, width: '180px' }} onClick={() => handleSort('assignee')} title="Ordenar por Responsável">
+                  <th
+                    style={{ ...styles.thCellSortable, width: '180px' }}
+                    onClick={(e) => handleSort('assignee', e)}
+                    onContextMenu={(e) => handleRemoveSort('assignee', e)}
+                    title="Clique esquerdo: Alternar/Adicionar ordenação | Clique direito: Remover ordenação desta coluna"
+                  >
                     Assignee {renderSortIcon('assignee')}
                   </th>
                 </tr>
@@ -442,7 +559,29 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
                 {sortedFilteredTickets.length === 0 ? (
                   <tr>
                     <td colSpan={6} style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--text-muted)' }}>
-                      Nenhum ticket encontrado para os filtros selecionados.
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                        <span>Nenhum ticket encontrado para os filtros selecionados.</span>
+                        <button
+                          className="btn"
+                          style={{
+                            padding: '6px 14px',
+                            fontSize: '13px',
+                            backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                            color: '#c084fc',
+                            border: '1px solid rgba(139, 92, 246, 0.4)',
+                            fontWeight: '700',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                          onClick={() => setIsLocalModalOpen(true)}
+                        >
+                          <Plus size={15} /> Criar Tarefa
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -523,9 +662,69 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
 
           {/* Table Footer Navigation Bar */}
           <div style={styles.tableFooterBar}>
-            <span style={{ fontWeight: '600', color: 'var(--text-secondary)' }}>
-              Exibindo <b>{sortedFilteredTickets.length}</b> de <b>{safeTickets.length}</b> tickets (Ordenado por {sortField} {sortOrder === 'asc' ? '▲' : '▼'})
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: '600', color: 'var(--text-secondary)' }}>
+                Exibindo <b>{sortedFilteredTickets.length}</b> de <b>{safeTickets.length}</b> tickets
+              </span>
+              {sortRules.length > 0 ? (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <span>(</span>
+                  {sortRules.map((rule, idx) => {
+                    const fieldLabels: Record<SortField, string> = {
+                      work: 'Chamado',
+                      labels: 'Label',
+                      status: 'Status',
+                      dueDate: 'Data',
+                      priority: 'Complexidade',
+                      assignee: 'Responsável',
+                    };
+                    return (
+                      <span key={rule.field} style={{ color: idx === 0 ? '#38bdf8' : '#c084fc', fontWeight: '600' }}>
+                        {idx === 0 ? 'Ordem 1: ' : ' | Ordem 2: '}
+                        {fieldLabels[rule.field]} {rule.order === 'asc' ? '▲' : '▼'}
+                      </span>
+                    );
+                  })}
+                  <span>)</span>
+                </span>
+              ) : (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>(Sem ordenação)</span>
+              )}
+              {sortRules.length > 1 && (
+                <button
+                  onClick={() => setSortRules([sortRules[0]])}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#ef4444',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: '0 4px',
+                  }}
+                  title="Remover a 2ª Ordem de ordenação"
+                >
+                  Limpar 2ª Ordem
+                </button>
+              )}
+              {sortRules.length === 0 && (
+                <button
+                  onClick={() => setSortRules([{ field: 'status', order: 'asc' }])}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#38bdf8',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: '0 4px',
+                  }}
+                  title="Restaurar a ordenação padrão por Status"
+                >
+                  Restaurar ordenação por Status
+                </button>
+              )}
+            </div>
             <button style={styles.tableRefreshBtn} onClick={() => onRefreshTickets && onRefreshTickets()} title="Recarregar">
               <RotateCcw size={14} /> <span style={{ fontSize: '12px' }}>Recarregar Dados</span>
             </button>
@@ -536,6 +735,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
       {isJiraModalOpen && (
         <AddJiraModal
           jiraInstances={safeJiraInstances}
+          existingTickets={tickets}
           onClose={() => setIsJiraModalOpen(false)}
           onFetchJiraTicket={async (key, instId) => {
             await onFetchJiraTicket(key, instId);
@@ -663,11 +863,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   boardContainer: {
     display: 'flex',
-    gap: '24px',
+    gap: '16px',
     flex: 1,
     height: '100%',
-    overflow: 'hidden',
-    padding: '24px',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    padding: '20px 24px',
   },
   tableWrapper: {
     flex: 1,

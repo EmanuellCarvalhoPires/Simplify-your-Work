@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import type { NoteItem } from '../../types/index';
 import { RichTextEditor } from './RichTextEditor';
+import { FileViewerModal } from '../common/FileViewerModal';
 import {
   FileText,
   Plus,
@@ -11,6 +12,10 @@ import {
   GripVertical,
   RefreshCw,
   Download,
+  Paperclip,
+  Table,
+  Image as ImageIcon,
+  FileCode,
 } from 'lucide-react';
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
@@ -81,6 +86,7 @@ interface NoteEditorProps {
   notes: NoteItem[];
   onCreateNote: (title: string) => Promise<NoteItem>;
   onCreateRichNote?: (title: string) => Promise<NoteItem>;
+  onSaveFileNote?: (fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number }) => Promise<NoteItem>;
   onReadContent: (filePath: string) => Promise<string>;
   onSaveContent: (filePath: string, title: string, content: string) => Promise<NoteItem>;
   onDeleteNote: (id: string) => Promise<void>;
@@ -94,6 +100,7 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   notes,
   onCreateRichNote,
   onCreateNote,
+  onSaveFileNote,
   onReadContent,
   onSaveContent,
   onDeleteNote,
@@ -110,6 +117,13 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   const [modalTitleInput, setModalTitleInput] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
+  const isFileNote = (n: NoteItem | null | undefined): boolean => {
+    if (!n) return false;
+    if (n.format === 'file') return true;
+    const ext = ((n.filePath || n.title || '').split('.').pop() || '').toLowerCase();
+    return ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+  };
+
   // Guards against cross-note state contamination during async loading & auto-saving
   const isLoadedRef = useRef<boolean>(false);
   const activeNoteRef = useRef<NoteItem | null>(null);
@@ -124,8 +138,16 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
     let isCancelled = false;
 
     if (activeNote) {
-      isLoadedRef.current = false;
       setNoteTitle(activeNote.title);
+
+      if (isFileNote(activeNote)) {
+        isLoadedRef.current = false;
+        setContent('');
+        setSaveStatus('Salvo');
+        return;
+      }
+
+      isLoadedRef.current = false;
       setSaveStatus('Carregando...');
 
       onReadContent(activeNote.filePath).then((text) => {
@@ -147,9 +169,9 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
     };
   }, [activeNote?.id, activeNote?.filePath]);
 
-  // Auto-save debounce (runs ONLY when isLoadedRef.current is true for current active note)
+  // Auto-save debounce (runs ONLY for text notes when isLoadedRef.current is true)
   useEffect(() => {
-    if (!activeNote || !isLoadedRef.current) return;
+    if (!activeNote || !isLoadedRef.current || isFileNote(activeNote)) return;
 
     setSaveStatus('Salvando...');
     const currentNoteId = activeNote.id;
@@ -159,7 +181,6 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
 
     const timer = setTimeout(async () => {
       try {
-        // Double check we are still on the exact same note
         if (activeNoteRef.current?.id !== currentNoteId) return;
 
         await onSaveContent(currentFilePath, currentTitle, currentContent);
@@ -217,6 +238,73 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
     }
   };
 
+  const handleAttachFile = async () => {
+    try {
+      let fileNote: NoteItem | null = null;
+      if (window.electronAPI?.pickLocalFile) {
+        const picked = await window.electronAPI.pickLocalFile();
+        if (picked) {
+          const payload = {
+            title: picked.fileName,
+            fileName: picked.fileName,
+            mimeType: picked.mimeType,
+            base64: picked.base64,
+            size: picked.size,
+          };
+          fileNote = onSaveFileNote
+            ? await onSaveFileNote(payload)
+            : window.electronAPI?.saveFileNote
+            ? await window.electronAPI.saveFileNote(payload)
+            : null;
+          if (fileNote) setActiveNote(fileNote);
+        }
+      } else {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp,.txt,.json,.log';
+        fileInput.onchange = async (e: any) => {
+          const file = e.target?.files?.[0];
+          if (!file) return;
+
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const b64 = (reader.result as string).split(',')[1] || '';
+            const payload = {
+              title: file.name,
+              fileName: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              base64: b64,
+              size: file.size,
+            };
+            fileNote = onSaveFileNote
+              ? await onSaveFileNote(payload)
+              : window.electronAPI?.saveFileNote
+              ? await window.electronAPI.saveFileNote(payload)
+              : null;
+            if (fileNote) setActiveNote(fileNote);
+          };
+          reader.readAsDataURL(file);
+        };
+        fileInput.click();
+      }
+    } catch (err) {
+      console.error('Erro ao anexar arquivo:', err);
+    }
+  };
+
+  const renderNoteIcon = (n: NoteItem, isActive: boolean) => {
+    const activeColor = isActive ? '#ffffff' : 'var(--text-secondary)';
+    if (n.format === 'file') {
+      const ext = (n.title.split('.').pop() || '').toLowerCase();
+      if (ext === 'pdf') return <FileText size={15} color="#ef4444" style={{ flexShrink: 0 }} />;
+      if (ext === 'docx' || ext === 'doc') return <FileText size={15} color="#3b82f6" style={{ flexShrink: 0 }} />;
+      if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return <Table size={15} color="#10b981" style={{ flexShrink: 0 }} />;
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return <ImageIcon size={15} color="#a855f7" style={{ flexShrink: 0 }} />;
+      return <Paperclip size={15} color="#cbd5e1" style={{ flexShrink: 0 }} />;
+    }
+    return <FileText size={15} color={activeColor} style={{ flexShrink: 0 }} />;
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
@@ -245,9 +333,9 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
           </span>
           <button
             className="btn btn-primary"
-            style={{ padding: '6px 12px', fontSize: '12px', gap: '6px' }}
+            style={{ padding: '6px 14px', fontSize: '12px', gap: '6px' }}
             onClick={handleOpenCreateModal}
-            title="Nova anotação"
+            title="Criar nova anotação ou anexar arquivo"
           >
             <Plus size={14} /> Nova
           </button>
@@ -258,7 +346,7 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
             <div style={styles.emptyList}>
               <FileText size={32} color="var(--text-muted)" />
               <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                Nenhuma anotação ainda.<br />Clique em "Nova" para começar.
+                Nenhuma anotação ou arquivo.<br />Clique em "Nova" ou "Anexar".
               </p>
             </div>
           ) : (
@@ -278,10 +366,12 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
                 title="Clique e arraste para reordenar"
               >
                 <GripVertical size={14} color="var(--text-muted)" style={{ cursor: 'grab', flexShrink: 0 }} />
-                <FileText size={15} color={activeNote?.id === n.id ? '#ffffff' : 'var(--text-secondary)'} style={{ flexShrink: 0 }} />
+                {renderNoteIcon(n, activeNote?.id === n.id)}
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                   <div style={styles.noteTitle}>{n.title}</div>
-                  <div style={styles.noteDate}>{new Date(n.updatedAt).toLocaleDateString('pt-BR')}</div>
+                  <div style={styles.noteDate}>
+                    {isFileNote(n) ? 'Arquivo Anexado' : new Date(n.updatedAt).toLocaleDateString('pt-BR')}
+                  </div>
                 </div>
               </div>
             ))
@@ -301,20 +391,25 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
               onChange={(e) => setNoteTitle(e.target.value)}
               style={styles.titleInput}
               placeholder="Título da Anotação..."
+              disabled={isFileNote(activeNote)}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-              <span style={styles.saveBadge}>
-                <Save size={12} /> {saveStatus}
-              </span>
-              <button
-                className="btn btn-secondary"
-                onClick={handleExport}
-                disabled={isExporting}
-                title="Exportar como .txt"
-                style={{ padding: '6px 12px', fontSize: '12px', gap: '6px' }}
-              >
-                <Download size={14} /> Exportar .txt
-              </button>
+              {!isFileNote(activeNote) && (
+                <span style={styles.saveBadge}>
+                  <Save size={12} /> {saveStatus}
+                </span>
+              )}
+              {!isFileNote(activeNote) && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleExport}
+                  disabled={isExporting}
+                  title="Exportar como .txt"
+                  style={{ padding: '6px 12px', fontSize: '12px', gap: '6px' }}
+                >
+                  <Download size={14} /> Exportar .txt
+                </button>
+              )}
               <button
                 className="btn btn-danger"
                 onClick={handleDelete}
@@ -326,13 +421,22 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
             </div>
           </div>
 
-          {/* Rich Text Editor */}
+          {/* Main Content Pane: Rich Text Editor OR File Document Viewer */}
           <div style={styles.editorWrapper}>
-            <RichTextEditor
-              key={activeNote.id}
-              content={content}
-              onChange={(html) => setContent(html)}
-            />
+            {isFileNote(activeNote) ? (
+              <FileViewerModal
+                key={activeNote.id}
+                filePath={activeNote.filePath}
+                onClose={() => setActiveNote(null)}
+                embedded={true}
+              />
+            ) : (
+              <RichTextEditor
+                key={activeNote.id}
+                content={content}
+                onChange={(html) => setContent(html)}
+              />
+            )}
           </div>
         </div>
       ) : (
@@ -357,35 +461,70 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
       {/* ── Create modal ── */}
       {isCreateModalOpen && (
         <div className="modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
               <h3 style={styles.modalTitle}>
-                <FileText size={18} color="var(--accent-primary)" /> Nova Anotação
+                <Plus size={18} color="var(--accent-primary)" /> Nova Anotação / Anexo
               </h3>
               <button className="btn-icon" onClick={() => setIsCreateModalOpen(false)}>
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleConfirmCreate} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+
+            {/* Quick Attachment Option Button */}
+            <div
+              onClick={() => {
+                setIsCreateModalOpen(false);
+                handleAttachFile();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '14px 16px',
+                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: '10px',
+                marginTop: '16px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              className="hover-bright"
+            >
+              <Paperclip size={20} color="#818cf8" style={{ flexShrink: 0 }} />
               <div>
-                <label style={styles.modalLabel}>Título:</label>
+                <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#ffffff', margin: 0 }}>
+                  📎 Anexar Arquivo do Computador
+                </h4>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  PDF, Word, Excel, CSV ou Imagens (salvo na barra lateral)
+                </p>
+              </div>
+            </div>
+
+            <div style={{ margin: '14px 0 6px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+              ── OU CRIE UMA ANOTAÇÃO EM TEXTO ──
+            </div>
+
+            <form onSubmit={handleConfirmCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={styles.modalLabel}>Título da Anotação de Texto:</label>
                 <input
                   type="text"
                   className="input-field"
                   value={modalTitleInput}
                   onChange={(e) => setModalTitleInput(e.target.value)}
-                  placeholder="Ex: Anotações da Reunião, Documentação..."
+                  placeholder="Ex: Anotações da Reunião..."
                   autoFocus
-                  required
                 />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsCreateModalOpen(false)}>
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isCreating}>
-                  <Plus size={16} />
-                  {isCreating ? 'Criando...' : 'Criar Anotação'}
+                  <FileText size={16} />
+                  {isCreating ? 'Criando...' : 'Criar Anotação de Texto'}
                 </button>
               </div>
             </form>

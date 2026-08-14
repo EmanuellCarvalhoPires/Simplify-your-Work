@@ -100,11 +100,77 @@ export const ReminderManager: React.FC<ReminderManagerProps> = ({
     }
   };
 
-  const handleToggleActive = async (r: Reminder) => {
-    await onSaveReminder({
-      ...r,
-      enabled: !r.enabled,
+  const [typeFilter, setTypeFilter] = useState<'all' | 'manual' | 'calendar'>('all');
+  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+
+  const filteredReminders = React.useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59);
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    return reminders.filter((r) => {
+      // 1. Source Type Filter
+      if (typeFilter === 'manual' && Boolean(r.eventId)) return false;
+      if (typeFilter === 'calendar' && !r.eventId) return false;
+
+      // 2. Time Period Filter
+      if (timeFilter !== 'all') {
+        let rDate: Date | null = null;
+        if (r.scheduledTime) {
+          if (r.scheduledTime.includes('T') || r.scheduledTime.includes('-')) {
+            const parsed = new Date(r.scheduledTime);
+            if (!isNaN(parsed.getTime())) rDate = parsed;
+          } else {
+            const match = r.scheduledTime.match(/(\d{1,2}):(\d{2})/);
+            if (match) {
+              rDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(match[1], 10), parseInt(match[2], 10));
+            }
+          }
+        }
+
+        if (!rDate) {
+          if (r.recurrence === 'INTERVAL') return true;
+          return false;
+        }
+
+        if (timeFilter === 'today') {
+          if (rDate < todayStart || rDate > todayEnd) return false;
+        } else if (timeFilter === 'week') {
+          if (rDate < weekStart || rDate > weekEnd) return false;
+        } else if (timeFilter === 'month') {
+          if (rDate < monthStart || rDate > monthEnd) return false;
+        }
+      }
+
+      return true;
     });
+  }, [reminders, typeFilter, timeFilter]);
+
+  const formatMeetingTimeTag = (r: Reminder) => {
+    if (r.eventId) {
+      if (r.scheduledTime) {
+        const dt = new Date(r.scheduledTime);
+        if (!isNaN(dt.getTime())) {
+          const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+          const timeStr = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          return `Próxima Reunião: ${dateStr} às ${timeStr}`;
+        }
+      }
+      return `Lembrete 30 min antes da reunião`;
+    }
+    if (r.recurrence === 'INTERVAL') return `A cada ${r.intervalMinutes} minutos`;
+    if (r.recurrence === 'DAILY') return `Todos os dias às ${r.scheduledTime}`;
+    if (r.recurrence === 'ONCE') return `Data/Hora: ${r.scheduledTime || 'Sem data'}`;
+    return '';
   };
 
   return (
@@ -121,34 +187,103 @@ export const ReminderManager: React.FC<ReminderManagerProps> = ({
         </button>
       </div>
 
+      {/* ── Filter Bar ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px', padding: '12px 18px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+        {/* Source Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Origem:</span>
+          <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'manual', label: '📌 Manuais (Criados)' },
+              { id: 'calendar', label: '📅 Agenda (Outlook)' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setTypeFilter(f.id as any)}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: typeFilter === f.id ? 'var(--accent-primary)' : 'var(--bg-card-app)',
+                  color: typeFilter === f.id ? '#fff' : 'var(--text-secondary)',
+                  transition: 'all 0.12s ease',
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Time Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Período:</span>
+          <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'today', label: 'Dia (Hoje)' },
+              { id: 'week', label: 'Semana' },
+              { id: 'month', label: 'Mês' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setTimeFilter(f.id as any)}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: timeFilter === f.id ? 'var(--accent-primary)' : 'var(--bg-card-app)',
+                  color: timeFilter === f.id ? '#fff' : 'var(--text-secondary)',
+                  transition: 'all 0.12s ease',
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div style={styles.grid}>
-        {reminders.length === 0 ? (
+        {filteredReminders.length === 0 ? (
           <div style={styles.emptyCard}>
             <Bell size={48} color="var(--text-muted)" />
             <h3 style={{ marginTop: '16px', fontSize: '17px', color: 'var(--text-primary)' }}>
-              Nenhum lembrete configurado
+              Nenhum lembrete encontrado para os filtros selecionados
             </h3>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px' }}>
-              Crie lembretes com disparo automático no seu Windows para manter a saúde e rotina de trabalho.
+              Altere os filtros de período/origem ou crie um novo lembrete.
             </p>
             <button className="btn btn-primary" style={{ marginTop: '20px' }} onClick={handleOpenAddModal}>
               <Plus size={16} /> Adicionar Lembrete
             </button>
           </div>
         ) : (
-          reminders.map((r) => (
+          filteredReminders.map((r) => (
             <div
               key={r.id}
               style={{
                 ...styles.card,
                 opacity: r.enabled ? 1 : 0.65,
-                borderLeft: `6px solid ${r.enabled ? 'var(--accent-primary)' : 'var(--text-muted)'}`,
+                borderLeft: `6px solid ${r.enabled ? (r.eventId ? '#6366f1' : 'var(--accent-primary)') : 'var(--text-muted)'}`,
               }}
             >
               <div style={styles.cardHeader}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Bell size={20} color={r.enabled ? 'var(--accent-blue)' : 'var(--text-muted)'} />
-                  <h3 style={styles.cardTitle}>{r.title}</h3>
+                  <Bell size={20} color={r.enabled ? (r.eventId ? '#818cf8' : 'var(--accent-blue)') : 'var(--text-muted)'} />
+                  <div>
+                    <h3 style={styles.cardTitle}>{r.title}</h3>
+                    {r.eventId && (
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#818cf8', backgroundColor: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: '4px', marginTop: '2px', display: 'inline-block' }}>
+                        📅 Agenda Outlook
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -171,9 +306,7 @@ export const ReminderManager: React.FC<ReminderManagerProps> = ({
               <div style={styles.cardFooter}>
                 <div style={styles.timeTag}>
                   <Clock size={14} />
-                  {r.recurrence === 'INTERVAL' && `A cada ${r.intervalMinutes} minutos`}
-                  {r.recurrence === 'DAILY' && `Todos os dias às ${r.scheduledTime}`}
-                  {r.recurrence === 'ONCE' && `Data/Hora: ${r.scheduledTime}`}
+                  {formatMeetingTimeTag(r)}
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -185,13 +318,15 @@ export const ReminderManager: React.FC<ReminderManagerProps> = ({
                   >
                     <Send size={13} /> Testar
                   </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '12px' }}
-                    onClick={() => handleOpenEditModal(r)}
-                  >
-                    Editar
-                  </button>
+                  {!r.eventId && (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '12px' }}
+                      onClick={() => handleOpenEditModal(r)}
+                    >
+                      Editar
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

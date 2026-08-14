@@ -6,9 +6,49 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "convert-assets": "node scripts/convert-assets.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pack": "tsc && vite build && electron-builder --dir",
+    "dist": "tsc && vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.simplifyyourwork.app",
+    "productName": "Simplify your Work",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "registrosMarkdown/**/*",
+      "public/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/assets/app-icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Simplify your Work"
+    }
   },
   "dependencies": {
     "@tiptap/extension-color": "^3.30.0",
@@ -26,10 +66,12 @@
     "better-sqlite3": "^13.0.3",
     "electron-store": "^11.0.2",
     "lucide-react": "^1.31.0",
+    "mammoth": "^1.12.1",
     "marked": "^18.0.9",
     "mongoose": "^9.9.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Store from 'electron-store';
-import type { Ticket, JiraInstance, Reminder, NoteItem } from '../src/types/index';
+import type { Ticket, JiraInstance, Reminder, NoteItem, UserProfile, ThemeConfig } from '../src/types/index';
 
 const store = new Store();
 let isMongoConnected = false;
@@ -13,6 +13,11 @@ const JiraInstanceSchema = new mongoose.Schema({
   domain: { type: String, required: true },
   email: { type: String, required: true },
   apiToken: { type: String, required: true },
+  authType: { type: String, default: 'API_TOKEN' },
+  accessToken: { type: String, default: '' },
+  refreshToken: { type: String, default: '' },
+  cloudId: { type: String, default: '' },
+  avatarUrl: { type: String, default: '' },
 });
 
 const CommentSchema = new mongoose.Schema(
@@ -51,6 +56,7 @@ const TicketSchema = new mongoose.Schema({
 
 const ReminderSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
+  eventId: { type: String, default: '' },
   title: { type: String, required: true },
   message: { type: String, required: true },
   recurrence: { type: String, required: true, default: 'INTERVAL' },
@@ -66,7 +72,11 @@ const NoteSchema = new mongoose.Schema({
   title: { type: String, required: true },
   filePath: { type: String, required: true },
   updatedAt: { type: String, required: true },
-  format: { type: String, default: 'markdown' },
+  format: { type: String, default: 'richtext' },
+  fileType: { type: String },
+  originalFileName: { type: String },
+  fileSize: { type: Number },
+  mimeType: { type: String },
 });
 
 const SavedJqlQuerySchema = new mongoose.Schema({
@@ -77,16 +87,26 @@ const SavedJqlQuerySchema = new mongoose.Schema({
   createdAt: { type: String, required: true },
 });
 
+const UserProfileSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+  role: { type: String, default: 'Desenvolvedor' },
+  avatarColor: { type: String, default: '#6366f1' },
+  themeConfig: { type: Object, required: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true },
+});
+
 // Explicit Collection Names
 const JiraInstanceModel = mongoose.models.JiraInstance || mongoose.model('JiraInstance', JiraInstanceSchema, 'jira_instances');
 const TicketModel = mongoose.models.Ticket || mongoose.model('Ticket', TicketSchema, 'tickets');
 const ReminderModel = mongoose.models.Reminder || mongoose.model('Reminder', ReminderSchema, 'reminders');
 const NoteModel = mongoose.models.Note || mongoose.model('Note', NoteSchema, 'notes');
 const SavedJqlQueryModel = mongoose.models.SavedJqlQuery || mongoose.model('SavedJqlQuery', SavedJqlQuerySchema, 'saved_jql_queries');
+const UserProfileModel = mongoose.models.UserProfile || mongoose.model('UserProfile', UserProfileSchema, 'user_profiles');
 
 export async function initDatabase(): Promise<boolean> {
-  if (isMongoConnected && mongoose.connection.readyState === 1) return true;
-
   const storedUri = store.get('mongodb_uri') as string;
   const urisToTry = storedUri
     ? [storedUri, 'mongodb://127.0.0.1:27017/simplify_work', 'mongodb://localhost:27017/simplify_work']
@@ -94,25 +114,21 @@ export async function initDatabase(): Promise<boolean> {
 
   for (const uri of urisToTry) {
     try {
-      console.log(`[MongoDB] Conectando a ${uri}...`);
-      if (mongoose.connection.readyState !== 0) {
-        await mongoose.disconnect();
-      }
       await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 3000,
-        directConnection: true,
+        serverSelectionTimeoutMS: 2000,
+        connectTimeoutMS: 2000,
       });
       isMongoConnected = true;
       currentMongoUri = uri;
-      store.set('mongodb_uri', uri);
-      console.log(`[MongoDB Standalone] Conexão estabelecida com sucesso em ${uri}!`);
+      console.log(`[MongoDB] Conectado com sucesso em: ${uri}`);
       return true;
-    } catch (err) {
-      console.warn(`[MongoDB] Não foi possível conectar a ${uri}`);
+    } catch (e) {
+      // Tentar próximo URI
     }
   }
 
   isMongoConnected = false;
+  console.warn('[MongoDB] Modo Local (electron-store) ativado - Banco MongoDB offline.');
   return false;
 }
 
@@ -123,12 +139,26 @@ export function getMongoStatus(): { connected: boolean; uri: string } {
   };
 }
 
-export async function setMongoUri(newUri: string): Promise<boolean> {
-  store.set('mongodb_uri', newUri);
-  return await initDatabase();
+export async function setMongoUri(newUri: string): Promise<{ success: boolean; message: string }> {
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
+    await mongoose.connect(newUri, {
+      serverSelectionTimeoutMS: 3000,
+      connectTimeoutMS: 3000,
+    });
+    isMongoConnected = true;
+    currentMongoUri = newUri;
+    store.set('mongodb_uri', newUri);
+    return { success: true, message: `Conectado com sucesso ao MongoDB em: ${newUri}` };
+  } catch (err: any) {
+    isMongoConnected = false;
+    return { success: false, message: `Falha ao conectar: ${err.message}` };
+  }
 }
 
-// === JIRA INSTANCES ===
+// === JIRA INSTANCES DATABASE FUNCTIONS ===
 export async function dbGetJiraInstances(): Promise<JiraInstance[]> {
   try {
     if (isMongoConnected) {
@@ -139,6 +169,11 @@ export async function dbGetJiraInstances(): Promise<JiraInstance[]> {
         domain: d.domain,
         email: d.email,
         apiToken: d.apiToken,
+        authType: d.authType || (d.cloudId ? 'OAUTH' : 'API_TOKEN'),
+        accessToken: d.accessToken || '',
+        refreshToken: d.refreshToken || '',
+        cloudId: d.cloudId || '',
+        avatarUrl: d.avatarUrl || '',
       }));
       if (list && list.length > 0) store.set('jira_instances_backup', list);
       return list;
@@ -493,6 +528,7 @@ export async function dbGetReminders(): Promise<Reminder[]> {
       const docs = await ReminderModel.find().sort({ createdAt: -1 }).lean();
       const list: Reminder[] = docs.map((d: any) => ({
         id: d.id,
+        eventId: d.eventId || '',
         title: d.title,
         message: d.message,
         recurrence: d.recurrence,
@@ -518,6 +554,7 @@ export async function dbSaveReminder(reminder: Partial<Reminder>): Promise<Remin
 
   const data: Reminder = {
     id,
+    eventId: reminder.eventId !== undefined ? reminder.eventId : '',
     title: reminder.title || 'Novo Lembrete',
     message: reminder.message || '',
     recurrence: reminder.recurrence || 'INTERVAL',
@@ -568,12 +605,21 @@ export async function dbGetNotes(): Promise<NoteItem[]> {
   try {
     if (isMongoConnected) {
       const docs = await NoteModel.find().sort({ updatedAt: -1 }).lean();
-      const rawList: NoteItem[] = docs.map((d: any) => ({
-        id: d.id,
-        title: d.title,
-        filePath: d.filePath,
-        updatedAt: d.updatedAt,
-      }));
+      const rawList: NoteItem[] = docs.map((d: any) => {
+        const ext = ((d.filePath || d.title || '').split('.').pop() || '').toLowerCase();
+        const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+        return {
+          id: d.id,
+          title: d.title,
+          filePath: d.filePath,
+          updatedAt: d.updatedAt,
+          format: d.format || (isBinaryFile ? 'file' : 'richtext'),
+          fileType: d.fileType,
+          originalFileName: d.originalFileName,
+          fileSize: d.fileSize,
+          mimeType: d.mimeType,
+        };
+      });
 
       // Deduplicate by filePath so each physical file appears exactly once
       const uniqueMap = new Map<string, NoteItem>();
@@ -590,11 +636,18 @@ export async function dbGetNotes(): Promise<NoteItem[]> {
   } catch (err) {
     console.error('[MongoDB Error dbGetNotes]:', err);
   }
+
   const backup = (store.get('notes_backup') as NoteItem[]) || [];
   const uniqueMap = new Map<string, NoteItem>();
   backup.forEach((item) => {
-    if (!uniqueMap.has(item.filePath)) {
-      uniqueMap.set(item.filePath, item);
+    const ext = ((item.filePath || item.title || '').split('.').pop() || '').toLowerCase();
+    const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+    const normalizedItem: NoteItem = {
+      ...item,
+      format: item.format || (isBinaryFile ? 'file' : 'richtext'),
+    };
+    if (!uniqueMap.has(normalizedItem.filePath)) {
+      uniqueMap.set(normalizedItem.filePath, normalizedItem);
     }
   });
   return Array.from(uniqueMap.values());
@@ -602,41 +655,37 @@ export async function dbGetNotes(): Promise<NoteItem[]> {
 
 export async function dbSaveNoteMeta(note: Partial<NoteItem>): Promise<NoteItem> {
   let id = note.id;
+  let existing: NoteItem | null = null;
 
-  // If no ID is passed, search by filePath to preserve existing record ID
-  if (!id && note.filePath) {
-    try {
-      if (isMongoConnected) {
-        const existingDoc = await NoteModel.findOne({ filePath: note.filePath }).lean();
-        if (existingDoc) {
-          id = (existingDoc as any).id;
-        }
-      }
-    } catch (e) {}
-
-    if (!id) {
-      const backup = (store.get('notes_backup') as NoteItem[]) || [];
-      const match = backup.find((n) => n.filePath === note.filePath);
-      if (match) id = match.id;
-    }
+  if (note.filePath) {
+    const backup = (store.get('notes_backup') as NoteItem[]) || [];
+    existing = backup.find((n) => n.filePath === note.filePath || (id && n.id === id)) || null;
+    if (!id && existing) id = existing.id;
   }
 
   if (!id) {
     id = 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
   }
 
+  const ext = ((note.filePath || existing?.filePath || note.title || '').split('.').pop() || '').toLowerCase();
+  const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+
   const now = new Date().toISOString();
   const data: NoteItem = {
     id,
-    title: note.title || 'Nova Anotação',
-    filePath: note.filePath || '',
+    title: note.title || existing?.title || 'Nova Anotação',
+    filePath: note.filePath || existing?.filePath || '',
     updatedAt: now,
-    format: note.format || 'markdown',
+    format: note.format || existing?.format || (isBinaryFile ? 'file' : 'richtext'),
+    fileType: note.fileType || existing?.fileType,
+    originalFileName: note.originalFileName || existing?.originalFileName,
+    fileSize: note.fileSize || existing?.fileSize,
+    mimeType: note.mimeType || existing?.mimeType,
   };
 
   try {
     if (isMongoConnected) {
-      await NoteModel.findOneAndUpdate({ filePath: note.filePath }, data, { upsert: true, new: true });
+      await NoteModel.findOneAndUpdate({ filePath: data.filePath }, data, { upsert: true, new: true });
     }
   } catch (err) {
     console.error('[MongoDB Error dbSaveNoteMeta]:', err);
@@ -644,12 +693,10 @@ export async function dbSaveNoteMeta(note: Partial<NoteItem>): Promise<NoteItem>
 
   try {
     const current = (store.get('notes_backup') as NoteItem[]) || [];
-    const exists = current.some((n) => n.filePath === note.filePath || n.id === id);
+    const exists = current.some((n) => n.filePath === data.filePath || n.id === id);
     const updatedList = exists
-      ? current.map((n) => (n.filePath === note.filePath || n.id === id ? data : n))
+      ? current.map((n) => (n.filePath === data.filePath || n.id === id ? data : n))
       : [data, ...current];
-
-    // Deduplicate backup list
     const uniqueMap = new Map<string, NoteItem>();
     updatedList.forEach((item) => {
       if (!uniqueMap.has(item.filePath)) {
@@ -676,5 +723,172 @@ export async function dbDeleteNoteMeta(id: string): Promise<boolean> {
     store.set('notes_backup', current.filter((n) => n.id !== id));
   } catch (e) {}
 
+  return true;
+}
+
+// === USER PROFILES DATABASE FUNCTIONS ===
+const defaultUserProfile: UserProfile = {
+  id: 'user_default_main',
+  name: 'Meu Perfil',
+  email: 'usuario@empresa.com',
+  role: 'Membro da Equipe',
+  avatarColor: '#6366f1',
+  themeConfig: {
+    presetName: 'Dark Slate (Padrão)',
+    bgMain: '#181825',
+    bgSidebar: '#1e1e2e',
+    bgHeader: '#1e1e2e',
+    bgCardJira: '#1e293b',
+    bgCardApp: '#27273a',
+    accentPrimary: '#6366f1',
+    textPrimary: '#f8fafc',
+    textSecondary: '#94a3b8',
+  },
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+export async function dbGetUsers(): Promise<UserProfile[]> {
+  try {
+    if (isMongoConnected) {
+      const list = await UserProfileModel.find().lean();
+      if (list && list.length > 0) {
+        const cleanList = list.map((u: any) => {
+          const { _id, __v, ...rest } = u;
+          return rest as UserProfile;
+        });
+        store.set('user_profiles_backup', cleanList);
+        return cleanList;
+      }
+    }
+  } catch (err) {
+    console.error('[MongoDB Error dbGetUsers]:', err);
+  }
+
+  const backup = (store.get('user_profiles_backup') as UserProfile[]) || [];
+  if (backup.length === 0) {
+    store.set('user_profiles_backup', [defaultUserProfile]);
+    if (isMongoConnected) {
+      try {
+        await UserProfileModel.create(defaultUserProfile);
+      } catch (e) {}
+    }
+    return [defaultUserProfile];
+  }
+  return backup;
+}
+
+export async function dbGetActiveUser(): Promise<UserProfile> {
+  const users = await dbGetUsers();
+  const activeId = store.get('active_user_id') as string;
+  if (activeId) {
+    const found = users.find((u) => u.id === activeId);
+    if (found) return found;
+  }
+  store.set('active_user_id', users[0].id);
+  return users[0];
+}
+
+export async function dbSetActiveUser(id: string): Promise<UserProfile> {
+  const users = await dbGetUsers();
+  const found = users.find((u) => u.id === id);
+  if (found) {
+    store.set('active_user_id', found.id);
+    store.set('themeConfig', found.themeConfig);
+    return found;
+  }
+  return users[0];
+}
+
+export async function dbSaveUser(user: Partial<UserProfile>): Promise<UserProfile> {
+  const users = await dbGetUsers();
+  const now = new Date().toISOString();
+  const id = user.id || `user_${Date.now()}`;
+  const existing = users.find((u) => u.id === id);
+
+  const data: UserProfile = {
+    id,
+    name: user.name || existing?.name || 'Novo Usuário',
+    email: user.email || existing?.email || 'usuario@empresa.com',
+    role: user.role || existing?.role || 'Desenvolvedor',
+    avatarColor: user.avatarColor || existing?.avatarColor || '#6366f1',
+    themeConfig: user.themeConfig || existing?.themeConfig || defaultUserProfile.themeConfig,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+
+  try {
+    if (isMongoConnected) {
+      await UserProfileModel.findOneAndUpdate({ id }, data, { upsert: true, new: true });
+    }
+  } catch (err) {
+    console.error('[MongoDB Error dbSaveUser]:', err);
+  }
+
+  try {
+    const current = (store.get('user_profiles_backup') as UserProfile[]) || [];
+    const exists = current.some((u) => u.id === id);
+    const updatedList = exists ? current.map((u) => (u.id === id ? data : u)) : [data, ...current];
+    store.set('user_profiles_backup', updatedList);
+  } catch (e) {}
+
+  const activeId = store.get('active_user_id') as string;
+  if (!activeId || activeId === id) {
+    store.set('active_user_id', id);
+    store.set('themeConfig', data.themeConfig);
+  }
+
+  return data;
+}
+
+export async function dbDeleteUser(id: string): Promise<boolean> {
+  try {
+    if (isMongoConnected) {
+      await UserProfileModel.deleteOne({ id });
+    }
+  } catch (err) {
+    console.error('[MongoDB Error dbDeleteUser]:', err);
+  }
+
+  try {
+    const current = (store.get('user_profiles_backup') as UserProfile[]) || [];
+    const updated = current.filter((u) => u.id !== id);
+
+    if (updated.length === 0) {
+      const freshUser: UserProfile = {
+        ...defaultUserProfile,
+        id: `user_${Date.now()}`,
+        name: 'Novo Usuário',
+        email: 'usuario@empresa.com',
+        role: 'Desenvolvedor',
+      };
+      store.set('user_profiles_backup', [freshUser]);
+      store.set('active_user_id', freshUser.id);
+      if (isMongoConnected) {
+        try {
+          await UserProfileModel.create(freshUser);
+        } catch (e) {}
+      }
+    } else {
+      store.set('user_profiles_backup', updated);
+      const activeId = store.get('active_user_id') as string;
+      if (activeId === id) {
+        store.set('active_user_id', updated[0].id);
+        store.set('themeConfig', updated[0].themeConfig);
+      }
+    }
+  } catch (e) {}
+
+  return true;
+}
+
+export async function dbSaveActiveUserTheme(theme: ThemeConfig): Promise<boolean> {
+  const activeUser = await dbGetActiveUser();
+  if (activeUser) {
+    activeUser.themeConfig = theme;
+    activeUser.updatedAt = new Date().toISOString();
+    await dbSaveUser(activeUser);
+  }
+  store.set('themeConfig', theme);
   return true;
 }

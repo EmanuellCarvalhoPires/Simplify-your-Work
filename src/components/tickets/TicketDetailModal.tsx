@@ -294,8 +294,22 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     });
   };
 
-  // Read & Preview Markdown Note Content
+  const checkIsFileNote = (n: NoteItem): boolean => {
+    if (!n) return false;
+    if (n.format === 'file') return true;
+    const ext = ((n.filePath || n.title || '').split('.').pop() || '').toLowerCase();
+    return ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+  };
+
+  // Read & Preview Markdown Note Content or open File Viewer for attachments
   const handleOpenNotePreview = async (note: NoteItem) => {
+    if (checkIsFileNote(note)) {
+      if ((window as any).openFileViewer) {
+        (window as any).openFileViewer(note.filePath);
+        return;
+      }
+    }
+
     setPreviewNote(note);
     setLoadingNote(true);
     try {
@@ -529,19 +543,19 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Attachments & Linked Markdown Notes Section */}
+            {/* Attachments & Linked Notes Section */}
             <div style={styles.contentSection}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <FileText size={16} color="#c084fc" />
-                  <h3 style={styles.sectionHeaderTitle}>Attachments & Markdown Notes ({linkedNotes.length})</h3>
+                  <h3 style={styles.sectionHeaderTitle}>Anotações & Anexos ({linkedNotes.length})</h3>
                 </div>
                 <button
                   style={styles.inlineEditBtn}
                   onClick={() => setIsNoteModalOpen(true)}
-                  title="Vincular anotação do Bloco de Notas a este ticket"
+                  title="Vincular anotação a este ticket"
                 >
-                  <Plus size={13} /> Vincular Nota Markdown
+                  <Plus size={13} /> Vincular Nota
                 </button>
               </div>
 
@@ -558,12 +572,11 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                         <div
                           style={styles.linkedTicketClickableArea}
                           onClick={() => handleOpenNotePreview(note)}
-                          title="Clique para visualizar o conteúdo desta anotação Markdown"
+                          title="Clique para visualizar o conteúdo desta anotação"
                         >
-                          <FileCode size={16} color="#c084fc" />
-                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#ffffff' }}>{note.title}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Eye size={12} color="var(--accent-blue)" /> Visualizar Nota
+                          <FileText size={15} color="#c084fc" />
+                          <span style={{ fontSize: '13px', fontWeight: '600', color: '#f8fafc' }}>
+                            {note.title}
                           </span>
                         </div>
                         <button
@@ -585,7 +598,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                       <Plus size={14} color="#ffffff" />
                     </div>
                     <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600' }}>
-                      Clique para vincular suas <b>Anotações Markdown</b> do Bloco de Notas a este ticket
+                      Clique para vincular suas <b>Anotações</b> a este ticket
                     </span>
                   </div>
                 )}
@@ -1015,7 +1028,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <FileCode size={18} color="#c084fc" />
                 <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: '#ffffff' }}>
-                  Vincular Anotação Markdown ao Ticket
+                  Vincular Anotação ao Ticket
                 </h3>
               </div>
               <button className="btn-icon" onClick={() => setIsNoteModalOpen(false)}>

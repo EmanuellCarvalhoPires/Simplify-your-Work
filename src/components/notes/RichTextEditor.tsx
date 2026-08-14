@@ -393,7 +393,11 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ content, onChang
         <Btn onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Tachado">
           <Strikethrough size={14} />
         </Btn>
-        <Btn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive('code')} title="Código inline">
+        <Btn
+          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          active={editor.isActive('codeBlock')}
+          title="Inserir Bloco de Código (Estilo Confluence)"
+        >
           <Code size={14} />
         </Btn>
         <Btn onClick={() => editor.chain().focus().toggleHighlight({ color: '#7c3aed33' }).run()} active={editor.isActive('highlight')} title="Destacar texto">
@@ -411,7 +415,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ content, onChang
         <Btn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Citação">
           <Quote size={14} />
         </Btn>
-        <Btn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} title="Bloco de código">
+        <Btn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive('code')} title="Código inline">
           <Type size={14} />
         </Btn>
         <Btn onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Linha horizontal">
