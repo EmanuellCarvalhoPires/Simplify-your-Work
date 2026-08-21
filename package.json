@@ -22,7 +22,8 @@
     "publish": {
       "provider": "github",
       "owner": "EmanuellCarvalhoPires",
-      "repo": "Simplify-your-Work"
+      "repo": "Simplify-your-Work",
+      "releaseType": "release"
     },
     "npmRebuild": false,
     "asar": true,
