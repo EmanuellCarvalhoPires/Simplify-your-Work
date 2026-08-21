@@ -3,8 +3,9 @@ import crypto from 'crypto';
 import { shell } from 'electron';
 import type { AccessibleJiraSite } from '../src/types/electron';
 
-// Default Atlassian OAuth credentials (can be overridden by user in settings or parameter)
-const DEFAULT_ATLASSIAN_CLIENT_ID = 'atlassian_oauth_simplify_work_client_id';
+// Default Atlassian OAuth credentials
+const DEFAULT_ATLASSIAN_CLIENT_ID = 'ylA7OylhMAcq3fuSo5EzXmdoXmysHfhh';
+const DEFAULT_ATLASSIAN_PROXY_URL = 'https://simplifyyourwork.vercel.app/api/token';
 
 export interface OAuthUserInfo {
   account_id?: string;
@@ -64,9 +65,9 @@ export function startAtlassianOAuthFlow(
   return new Promise((resolve, reject) => {
     cancelActiveOAuthFlow();
 
-    const clientId = customClientId?.trim() || savedClientId?.trim() || process.env.ATLASSIAN_CLIENT_ID || DEFAULT_ATLASSIAN_CLIENT_ID;
-    const clientSecret = customClientSecret?.trim() || savedClientSecret?.trim() || process.env.ATLASSIAN_CLIENT_SECRET || '';
-    const proxyUrl = customProxyUrl?.trim() || savedProxyUrl?.trim() || process.env.ATLASSIAN_PROXY_URL || '';
+    const clientId = customClientId?.trim() || savedClientId?.trim() || process.env.VITE_ATLASSIAN_CLIENT_ID || process.env.ATLASSIAN_CLIENT_ID || DEFAULT_ATLASSIAN_CLIENT_ID;
+    const clientSecret = customClientSecret?.trim() || savedClientSecret?.trim() || process.env.VITE_ATLASSIAN_CLIENT_SECRET || process.env.ATLASSIAN_CLIENT_SECRET || '';
+    const proxyUrl = customProxyUrl?.trim() || savedProxyUrl?.trim() || process.env.VITE_ATLASSIAN_PROXY_URL || process.env.ATLASSIAN_PROXY_URL || DEFAULT_ATLASSIAN_PROXY_URL;
     const port = 3000;
     const redirectUri = `http://localhost:${port}/callback`;
 
@@ -260,9 +261,9 @@ export function startAtlassianOAuthFlow(
 
     server.listen(port, () => {
       activeOAuthServer = server;
-      // 5. Open Atlassian Authorize URL in user's default browser with PKCE parameters
-      const scopes = encodeURIComponent('read:me read:jira-work read:jira-user offline_access');
-      const authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&prompt=login&code_challenge=${codeChallenge}&code_challenge_method=S256`;
+      // 5. Open Atlassian Authorize URL in user's default browser with PKCE parameters (includes write:jira-work for commenting and modifying issues)
+      const scopes = encodeURIComponent('read:me read:jira-work write:jira-work read:jira-user offline_access');
+      const authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&prompt=consent&code_challenge=${codeChallenge}&code_challenge_method=S256`;
       shell.openExternal(authUrl);
     });
 
@@ -272,3 +273,91 @@ export function startAtlassianOAuthFlow(
     });
   });
 }
+
+export async function refreshAtlassianToken(
+  refreshToken: string,
+  customClientId?: string,
+  savedClientId?: string,
+  customClientSecret?: string,
+  savedClientSecret?: string,
+  customProxyUrl?: string,
+  savedProxyUrl?: string
+): Promise<{ accessToken: string; refreshToken?: string }> {
+  const clientId = customClientId?.trim() || savedClientId?.trim() || process.env.VITE_ATLASSIAN_CLIENT_ID || process.env.ATLASSIAN_CLIENT_ID || DEFAULT_ATLASSIAN_CLIENT_ID;
+  const clientSecret = customClientSecret?.trim() || savedClientSecret?.trim() || process.env.VITE_ATLASSIAN_CLIENT_SECRET || process.env.ATLASSIAN_CLIENT_SECRET || '';
+  const proxyUrl = customProxyUrl?.trim() || savedProxyUrl?.trim() || process.env.VITE_ATLASSIAN_PROXY_URL || process.env.ATLASSIAN_PROXY_URL || DEFAULT_ATLASSIAN_PROXY_URL;
+
+  let formattedProxyUrl = proxyUrl.trim();
+  if (formattedProxyUrl && !formattedProxyUrl.startsWith('http://') && !formattedProxyUrl.startsWith('https://')) {
+    if (formattedProxyUrl.includes('.vercel.app') || formattedProxyUrl.includes('.')) {
+      formattedProxyUrl = `https://${formattedProxyUrl}`;
+    } else {
+      formattedProxyUrl = '';
+    }
+  }
+
+  let tokenRes: Response | null = null;
+  let lastError = '';
+
+  // 1. Tenta renovar via Serverless Proxy se configurado
+  if (formattedProxyUrl) {
+    try {
+      const targetUrl = formattedProxyUrl.endsWith('/api/token') ? formattedProxyUrl : `${formattedProxyUrl.replace(/\/+$/, '')}/api/token`;
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          client_id: clientId,
+          refresh_token: refreshToken,
+        }),
+      });
+      if (res.ok) {
+        tokenRes = res;
+      } else {
+        const errBody = await res.text();
+        lastError = `Proxy (${res.status}): ${errBody}`;
+      }
+    } catch (proxyErr: any) {
+      lastError = `Proxy network error: ${proxyErr.message}`;
+    }
+  }
+
+  // 2. Se o proxy falhar ou não estiver configurado, tenta direto na Atlassian
+  if (!tokenRes || !tokenRes.ok) {
+    try {
+      const tokenPayload: any = {
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        refresh_token: refreshToken,
+      };
+      if (clientSecret) {
+        tokenPayload.client_secret = clientSecret;
+      }
+      const directRes = await fetch('https://auth.atlassian.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tokenPayload),
+      });
+      if (directRes.ok) {
+        tokenRes = directRes;
+      } else {
+        const directErr = await directRes.text();
+        lastError = `Atlassian Direct (${directRes.status}): ${directErr}`;
+      }
+    } catch (directNetErr: any) {
+      lastError = `Atlassian Direct network error: ${directNetErr.message}`;
+    }
+  }
+
+  if (!tokenRes || !tokenRes.ok) {
+    throw new Error(`Falha ao renovar token Atlassian: ${lastError}`);
+  }
+
+  const tokenData = await tokenRes.json();
+  return {
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token || refreshToken,
+  };
+}
+

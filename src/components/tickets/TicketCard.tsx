@@ -1,13 +1,22 @@
 import React from 'react';
 import type { Ticket } from '../../types/index';
-import { MessageSquare, Tag, AlertCircle } from 'lucide-react';
+import { MessageSquare, Tag, AlertCircle, Check } from 'lucide-react';
 
 interface TicketCardProps {
   ticket: Ticket;
+  isSelected?: boolean;
+  selectionMode?: boolean;
   onClick: (ticket: Ticket) => void;
+  onToggleSelect?: (ticketId: string, e: React.MouseEvent) => void;
 }
 
-export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
+export const TicketCard: React.FC<TicketCardProps> = ({
+  ticket,
+  isSelected = false,
+  selectionMode = false,
+  onClick,
+  onToggleSelect,
+}) => {
   const isJira = ticket.source === 'JIRA';
 
   const getStatusBadge = () => {
@@ -23,7 +32,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
     }
   };
 
-  const cardBgColor = ticket.color || (isJira ? 'var(--bg-card-jira)' : 'var(--bg-card-app)');
+  const cardBgColor = isSelected
+    ? 'rgba(56, 189, 248, 0.12)'
+    : ticket.color || (isJira ? 'var(--bg-card-jira)' : 'var(--bg-card-app)');
 
   return (
     <div
@@ -31,11 +42,35 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
       style={{
         ...styles.card,
         backgroundColor: cardBgColor,
-        borderLeft: `6px solid ${ticket.color || (isJira ? '#38bdf8' : '#8b5cf6')}`,
+        borderLeft: `6px solid ${isSelected ? '#38bdf8' : (ticket.color || (isJira ? '#38bdf8' : '#8b5cf6'))}`,
+        borderColor: isSelected ? '#38bdf8' : 'var(--border-subtle)',
+        boxShadow: isSelected
+          ? '0 0 0 1px #38bdf8, 0 8px 24px rgba(56, 189, 248, 0.25)'
+          : '0 4px 12px rgba(0, 0, 0, 0.25)',
       }}
+      className="ticket-card-hover"
     >
       <div style={styles.cardHeader}>
         <div style={styles.titleBox}>
+          {onToggleSelect && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelect(ticket.id, e);
+              }}
+              style={{
+                ...styles.checkboxBtn,
+                backgroundColor: isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.1)',
+                borderColor: isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.3)',
+                opacity: isSelected || selectionMode ? 1 : 0.6,
+              }}
+              title={isSelected ? 'Desmarcar ticket' : 'Selecionar ticket'}
+            >
+              {isSelected && <Check size={12} color="#0f172a" strokeWidth={3.5} />}
+            </button>
+          )}
+
           {isJira && (
             <img src="./assets/jira-badge.png" alt="Jira" style={styles.badgeIcon} />
           )}
@@ -178,5 +213,18 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: '4px',
     color: 'var(--text-secondary)',
+  },
+  checkboxBtn: {
+    width: '20px',
+    height: '20px',
+    borderRadius: '5px',
+    border: '1.5px solid',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
+    padding: 0,
+    transition: 'all 0.15s ease',
   },
 };

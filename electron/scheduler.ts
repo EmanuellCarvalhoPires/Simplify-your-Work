@@ -3,17 +3,20 @@ import path from 'path';
 import fs from 'fs';
 import { dbGetReminders, dbSaveReminder, dbDeleteReminder } from './database';
 import { getCachedEvents } from './calendar-service';
+import { shouldSuppressNotification } from './teams-detector';
 import type { Reminder } from '../src/types/index';
 
 let checkInterval: NodeJS.Timeout | null = null;
+let isChecking = false;
+const loggedPausedReminders = new Set<string>();
 
 export function startReminderScheduler(): void {
   if (checkInterval) return;
 
-  // Run check every 5 seconds for immediate precision
+  // Run check every 10 seconds
   checkInterval = setInterval(() => {
     checkReminders();
-  }, 5000);
+  }, 10000);
 
   // Initial check after 2 seconds
   setTimeout(() => {
@@ -54,13 +57,27 @@ function parseScheduledDate(scheduledTimeStr: string): Date | null {
 }
 
 async function checkReminders(): Promise<void> {
+  if (isChecking) return;
+  isChecking = true;
+
   try {
     const reminders = await dbGetReminders();
     const now = new Date();
     const cachedEvents = getCachedEvents();
+    const activeReminderIds = new Set(reminders.map((r) => r.id));
 
-    reminders.forEach(async (r) => {
-      if (!r.enabled) return;
+    // Limpa registros de lembretes pausados que já não existem mais
+    for (const id of loggedPausedReminders) {
+      if (!activeReminderIds.has(id)) {
+        loggedPausedReminders.delete(id);
+      }
+    }
+
+    for (const r of reminders) {
+      if (!r.enabled) {
+        loggedPausedReminders.delete(r.id);
+        continue;
+      }
 
       let shouldTrigger = false;
       let notificationMsg = r.message || r.title;
@@ -75,14 +92,14 @@ async function checkReminders(): Promise<void> {
 
         for (const occ of seriesOccurrences) {
           const occStart = new Date(occ.start);
-          const occEnd = new Date(occ.end);
           // Calculate 30 minutes before meeting start time
           const reminderTime = new Date(occStart.getTime() - 30 * 60 * 1000);
+          // Only alert within the window: 30 minutes before start up to 5 minutes after meeting begins
+          const maxTriggerTime = new Date(occStart.getTime() + 5 * 60 * 1000);
 
-          // Check if now is within the 30-min window before start (up to end of meeting)
-          if (now >= reminderTime && now < occEnd) {
+          if (now >= reminderTime && now <= maxTriggerTime) {
             const lastTrigMs = last ? last.getTime() : 0;
-            // Prevent duplicate triggers for the same 30-min window (45 min tolerance)
+            // Prevent duplicate triggers for the same occurrence (within 45 min tolerance of reminderTime)
             const alreadyTriggeredForOcc = Math.abs(lastTrigMs - reminderTime.getTime()) < 45 * 60 * 1000;
 
             if (!alreadyTriggeredForOcc) {
@@ -96,7 +113,12 @@ async function checkReminders(): Promise<void> {
       } else if (r.recurrence === 'INTERVAL') {
         const intervalMs = intervalMins * 60 * 1000;
         if (!last) {
-          shouldTrigger = true;
+          // Initialize lastTriggered to now so it waits for the full interval instead of firing immediately upon app start
+          await dbSaveReminder({
+            ...r,
+            lastTriggered: now.toISOString(),
+            enabled: r.enabled,
+          });
         } else {
           const diffMs = now.getTime() - last.getTime();
           if (diffMs >= intervalMs) {
@@ -106,14 +128,51 @@ async function checkReminders(): Promise<void> {
       } else if ((r.recurrence === 'DAILY' || r.recurrence === 'ONCE') && r.scheduledTime) {
         const scheduledDate = parseScheduledDate(r.scheduledTime);
         if (scheduledDate) {
-          if (now >= scheduledDate && (!last || last < scheduledDate)) {
+          const diffMs = now.getTime() - scheduledDate.getTime();
+          // Only trigger if scheduled time reached AND within a 15-minute tolerance window (avoiding firing stale past reminders on app start)
+          const isWithinWindow = diffMs >= 0 && diffMs <= 15 * 60 * 1000;
+          if (isWithinWindow && (!last || last < scheduledDate)) {
             shouldTrigger = true;
+          } else if (r.recurrence === 'ONCE' && diffMs > 15 * 60 * 1000 && !last) {
+            // Expired one-time reminder from past days/hours: clean up silently
+            await dbDeleteReminder(r.id);
           }
         }
       }
 
       if (shouldTrigger) {
-        console.log(`[SCHEDULER] Disparando notificação do lembrete "${r.title}" em ${now.toLocaleTimeString()}`);
+        // Verificar se deve suprimir notificações por estar em reunião do Teams ou Agenda
+        const suppression = await shouldSuppressNotification();
+        if (suppression.suppress) {
+          // Loga apenas uma vez a mensagem de pausa para este lembrete
+          if (!loggedPausedReminders.has(r.id)) {
+            console.log(`[SCHEDULER] Lembrete "${r.title}" pausado temporariamente: ${suppression.reason}`);
+            loggedPausedReminders.add(r.id);
+          }
+
+          if (!suppression.settings.postponeMutedReminders) {
+            // Se o usuário não quiser adiar, descartar silenciosamente
+            loggedPausedReminders.delete(r.id);
+            if (r.recurrence === 'ONCE') {
+              await dbDeleteReminder(r.id);
+            } else {
+              await dbSaveReminder({
+                ...r,
+                lastTriggered: now.toISOString(),
+                enabled: r.enabled,
+              });
+            }
+          }
+          continue;
+        }
+
+        if (loggedPausedReminders.has(r.id)) {
+          console.log(`[SCHEDULER] Reunião finalizada. Disparando lembrete adiado "${r.title}" em ${now.toLocaleTimeString()}`);
+          loggedPausedReminders.delete(r.id);
+        } else {
+          console.log(`[SCHEDULER] Disparando notificação do lembrete "${r.title}" em ${now.toLocaleTimeString()}`);
+        }
+
         triggerNotification({ ...r, message: notificationMsg });
 
         if (r.eventId) {
@@ -143,10 +202,16 @@ async function checkReminders(): Promise<void> {
             enabled: r.enabled,
           });
         }
+      } else {
+        if (loggedPausedReminders.has(r.id)) {
+          loggedPausedReminders.delete(r.id);
+        }
       }
-    });
+    }
   } catch (err) {
     console.error('Erro no verificador de lembretes:', err);
+  } finally {
+    isChecking = false;
   }
 }
 
@@ -156,12 +221,18 @@ export function triggerNotification(reminder: Partial<Reminder>): void {
     return;
   }
 
-  const iconPath = path.join(app.getAppPath(), 'public', 'assets', 'app-icon.png');
+  const appPath = app.getAppPath();
+  const iconCandidates = [
+    path.join(appPath, 'public', 'assets', 'app-icon.png'),
+    path.join(appPath, 'dist', 'assets', 'app-icon.png'),
+    path.resolve(process.cwd(), 'public', 'assets', 'app-icon.png'),
+  ];
+  const iconPath = iconCandidates.find((c) => fs.existsSync(c));
 
   const notification = new Notification({
     title: `⏰ ${reminder.title || 'Lembrete Simplify your Work'}`,
     body: reminder.message || reminder.title || 'Lembrete agendado',
-    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    icon: iconPath,
     silent: false,
   });
 

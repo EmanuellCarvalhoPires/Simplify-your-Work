@@ -9,7 +9,17 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-electron
+dist-installer
 dist-ssr
+release
+*.exe
+*.blockmap
+*.asar
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.local
 
 # Editor directories and files

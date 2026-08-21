@@ -8,8 +8,10 @@ interface TicketColumnProps {
   iconSrc?: string;
   accentColor?: string;
   tickets: Ticket[];
+  selectedTicketIds?: Set<string>;
   onAddClick: () => void;
   onCardClick: (ticket: Ticket) => void;
+  onToggleSelectTicket?: (ticketId: string, e: React.MouseEvent) => void;
 }
 
 export const TicketColumn: React.FC<TicketColumnProps> = ({
@@ -17,8 +19,10 @@ export const TicketColumn: React.FC<TicketColumnProps> = ({
   iconSrc,
   accentColor = '#6366f1',
   tickets,
+  selectedTicketIds = new Set(),
   onAddClick,
   onCardClick,
+  onToggleSelectTicket,
 }) => {
   return (
     <div style={styles.columnContainer}>
@@ -74,7 +78,16 @@ export const TicketColumn: React.FC<TicketColumnProps> = ({
             </button>
           </div>
         ) : (
-          tickets.map((t) => <TicketCard key={t.id} ticket={t} onClick={onCardClick} />)
+          tickets.map((t) => (
+            <TicketCard
+              key={t.id}
+              ticket={t}
+              isSelected={selectedTicketIds.has(t.id)}
+              selectionMode={selectedTicketIds.size > 0}
+              onClick={onCardClick}
+              onToggleSelect={onToggleSelectTicket}
+            />
+          ))
         )}
       </div>
     </div>

@@ -6,19 +6,33 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run convert-assets && tsc && vite build",
     "convert-assets": "node scripts/convert-assets.mjs",
     "preview": "vite preview",
-    "pack": "tsc && vite build && electron-builder --dir",
-    "dist": "tsc && vite build && electron-builder"
+    "pack": "npm run convert-assets && tsc && vite build && electron-builder --dir",
+    "dist": "npm run convert-assets && tsc && vite build && electron-builder"
   },
+  "description": "Simplify your Work - Hub Unificado de Produtividade, Gestão de Tickets, Agenda e Clientes",
+  "author": "Simplify Team",
   "build": {
     "appId": "com.simplifyyourwork.app",
     "productName": "Simplify your Work",
     "copyright": "Copyright © 2026",
-    "directories": {
-      "output": "dist-installer"
+    "publish": {
+      "provider": "github",
+      "owner": "EmanuellCarvalhoPires",
+      "repo": "Simplify-your-Work"
     },
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**"
+    ],
+    "directories": {
+      "output": "dist-installer",
+      "buildResources": "build"
+    },
+    "icon": "public/assets/app-icon.ico",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -40,14 +54,17 @@
           ]
         }
       ],
-      "icon": "public/assets/app-icon.png"
+      "icon": "public/assets/app-icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Simplify your Work"
+      "shortcutName": "Simplify your Work",
+      "installerIcon": "public/assets/app-icon.ico",
+      "uninstallerIcon": "public/assets/app-icon.ico",
+      "installerHeaderIcon": "public/assets/app-icon.ico"
     }
   },
   "dependencies": {
@@ -57,6 +74,8 @@
     "@tiptap/extension-link": "^3.30.0",
     "@tiptap/extension-placeholder": "^3.30.0",
     "@tiptap/extension-table": "^3.30.0",
+    "@tiptap/extension-task-item": "^3.30.0",
+    "@tiptap/extension-task-list": "^3.30.0",
     "@tiptap/extension-text-style": "^3.30.0",
     "@tiptap/extension-underline": "^3.30.0",
     "@tiptap/pm": "^3.30.0",
@@ -65,10 +84,10 @@
     "@types/marked": "^5.0.2",
     "better-sqlite3": "^13.0.3",
     "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.31.0",
     "mammoth": "^1.12.1",
     "marked": "^18.0.9",
-    "mongoose": "^9.9.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "xlsx": "^0.18.5"

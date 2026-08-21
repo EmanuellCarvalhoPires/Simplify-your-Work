@@ -346,7 +346,7 @@ export const UnifiedHub: React.FC<UnifiedHubProps> = ({
                       <th style={styles.thCell}>Mensagem</th>
                       <th style={{ ...styles.thCell, width: '140px' }}>Recorrência</th>
                       <th style={{ ...styles.thCell, width: '160px' }}>Horário / Frequência</th>
-                      <th style={{ ...styles.thCell, width: '110px', textAlign: 'center' }}>Testar</th>
+                      <th style={{ ...styles.thCell, width: '110px', textAlign: 'center' }}>Ação</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -160,6 +160,21 @@ p, span, h1, h2, h3, h4, h5, h6, input, textarea, td, th, code, pre, label, b, s
   box-shadow: 0 0 0 3px var(--border-focus);
 }
 
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.9);
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 /* Card Badge Pills */
 .badge {
   display: inline-flex;
@@ -235,6 +250,48 @@ p, span, h1, h2, h3, h4, h5, h6, input, textarea, td, th, code, pre, label, b, s
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes teamsProgress {
+  0% { left: -40%; width: 40%; }
+  50% { left: 30%; width: 50%; }
+  100% { left: 100%; width: 40%; }
+}
+
+.teams-loading-bar-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #6366f1, #38bdf8, #818cf8);
+  border-radius: 2px;
+  animation: teamsProgress 1.4s ease-in-out infinite;
+}
+
+.outlook-loading-bar-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #0284c7, #38bdf8, #0369a1);
+  border-radius: 2px;
+  animation: teamsProgress 1.4s ease-in-out infinite;
+}
+
+.ai-loading-bar-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #3b82f6);
+  border-radius: 2px;
+  animation: teamsProgress 1.4s ease-in-out infinite;
 }
 
 /* ===== Markdown Renderer (note viewer inside tickets) ===== */
@@ -324,6 +381,29 @@ p, span, h1, h2, h3, h4, h5, h6, input, textarea, td, th, code, pre, label, b, s
 .markdown-body tr:nth-child(even) td { background: rgba(255,255,255,0.025); }
 .markdown-body strong { color: #f8fafc; font-weight: 700; }
 .markdown-body em { color: #c4b5fd; font-style: italic; }
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 1em 0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+.markdown-body input[type="checkbox"] {
+  margin-right: 8px;
+  accent-color: var(--accent-primary, #6366f1);
+  vertical-align: middle;
+}
+.markdown-body kbd {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2);
+  color: #f8fafc;
+  display: inline-block;
+  font-family: monospace;
+  font-size: 0.85em;
+  padding: 2px 5px;
+}
 
 /* ===== Tiptap Rich Text Editor ===== */
 .rich-editor-area {
@@ -436,59 +516,269 @@ p, span, h1, h2, h3, h4, h5, h6, input, textarea, td, th, code, pre, label, b, s
   height: auto;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.1);
-  margin: 0.8em 0;
-  display: block;
+  display: inline-block;
+  vertical-align: middle;
+}
+.rich-editor-area .resizable-image-wrapper {
+  display: inline-flex !important;
+  vertical-align: middle !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 0 4px !important;
+  line-height: 1 !important;
+}
+.rich-editor-area .resizable-image-wrapper img {
+  margin: 0;
+  max-width: 100%;
+  display: inline-block;
+  vertical-align: middle;
 }
 .rich-editor-area img.ProseMirror-selectednode {
-  outline: 2px solid #6366f1;
+  outline: 2px solid #38bdf8;
   outline-offset: 2px;
 }
 
-/* Tables */
+/* ─── TipTap Tables & Confluence-style Column Resizing ─── */
+.rich-editor-area .tableWrapper {
+  overflow-x: auto;
+  margin: 1.25em 0;
+  max-width: 100%;
+}
+
 .rich-editor-area table {
   border-collapse: collapse;
+  table-layout: fixed !important;
   width: 100%;
-  margin: 1em 0;
-  font-size: 13px;
+  margin: 0;
+  font-size: 13.5px;
   overflow: hidden;
   border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
-.rich-editor-area th {
-  background: rgba(99,102,241,0.2);
-  color: #a5b4fc;
-  font-weight: 700;
-  padding: 10px 14px;
-  text-align: left;
-  border: 1px solid rgba(255,255,255,0.1);
-}
+
+.rich-editor-area th,
 .rich-editor-area td {
-  padding: 8px 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  color: #e2e8f0;
+  position: relative !important;
+  box-sizing: border-box !important;
+  min-width: 40px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   vertical-align: top;
+  line-height: 1.5;
 }
+
+.rich-editor-area th {
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+  font-weight: 700;
+  text-align: left;
+  border-bottom: 2px solid rgba(99, 102, 241, 0.4);
+}
+
+.rich-editor-area td {
+  color: #e2e8f0;
+}
+
 .rich-editor-area td:focus,
-.rich-editor-area th:focus { outline: none; background: rgba(99,102,241,0.1); }
-.rich-editor-area tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.rich-editor-area th:focus {
+  outline: none;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.rich-editor-area tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .rich-editor-area .selectedCell:after {
-  background: rgba(99,102,241,0.15);
+  background: rgba(99, 102, 241, 0.18);
   content: '';
-  left: 0; right: 0; top: 0; bottom: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
   pointer-events: none;
   position: absolute;
   z-index: 2;
+  border: 1px solid var(--accent-primary, #6366f1);
 }
+
+/* Confluence Style Column Resizer Handle */
 .rich-editor-area .column-resize-handle {
-  background-color: #6366f1;
-  bottom: -2px;
-  position: absolute;
-  right: -2px;
-  pointer-events: none;
-  top: 0;
-  width: 4px;
+  position: absolute !important;
+  right: -2px !important;
+  top: 0 !important;
+  bottom: -2px !important;
+  width: 4px !important;
+  background-color: var(--accent-primary, #6366f1) !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.8) !important;
+  pointer-events: none !important;
+  z-index: 20 !important;
 }
-.rich-editor-area .tableWrapper { overflow-x: auto; }
-.rich-editor-area .resize-cursor { cursor: col-resize; }
+
+/* Cursor when hovering or dragging table column resize */
+.ProseMirror.resize-cursor,
+.ProseMirror.resize-cursor *,
+.rich-editor-area.resize-cursor,
+.rich-editor-area.resize-cursor * {
+  cursor: col-resize !important;
+}
+
+/* TipTap TaskList / Checkbox Styles */
+.rich-editor-area ul[data-type="taskList"],
+.note-rendered-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 1.8em;
+  margin: 0.25em 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] + ul[data-type="taskList"],
+.note-rendered-content ul[data-type="taskList"] + ul[data-type="taskList"] {
+  margin-top: 0;
+}
+
+.rich-editor-area ol > li > ul[data-type="taskList"],
+.rich-editor-area ul > li > ul[data-type="taskList"],
+.rich-editor-area ul[data-type="taskList"] > li > ul[data-type="taskList"],
+.note-rendered-content ol > li > ul[data-type="taskList"],
+.note-rendered-content ul > li > ul[data-type="taskList"],
+.note-rendered-content ul[data-type="taskList"] > li > ul[data-type="taskList"] {
+  padding-left: 1.8em;
+  margin: 0.15em 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] li,
+.note-rendered-content ul[data-type="taskList"] li,
+.rich-editor-area ul li,
+.rich-editor-area ol li,
+.note-rendered-content ul li,
+.note-rendered-content ol li {
+  transition: margin-left 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rich-editor-area ul[data-type="taskList"] li,
+.note-rendered-content ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  position: relative;
+  margin: 0.55em 0;
+  line-height: 1.6;
+}
+
+.rich-editor-area ul[data-type="taskList"] li[data-indent="1"],
+.note-rendered-content ul[data-type="taskList"] li[data-indent="1"] { margin-left: 1.8em; }
+.rich-editor-area ul[data-type="taskList"] li[data-indent="2"],
+.note-rendered-content ul[data-type="taskList"] li[data-indent="2"] { margin-left: 3.6em; }
+.rich-editor-area ul[data-type="taskList"] li[data-indent="3"],
+.note-rendered-content ul[data-type="taskList"] li[data-indent="3"] { margin-left: 5.4em; }
+.rich-editor-area ul[data-type="taskList"] li[data-indent="4"],
+.note-rendered-content ul[data-type="taskList"] li[data-indent="4"] { margin-left: 7.2em; }
+.rich-editor-area ul[data-type="taskList"] li[data-indent="5"],
+.note-rendered-content ul[data-type="taskList"] li[data-indent="5"] { margin-left: 9.0em; }
+
+.rich-editor-area ul > li[data-indent="1"],
+.rich-editor-area ol > li[data-indent="1"],
+.note-rendered-content ul > li[data-indent="1"],
+.note-rendered-content ol > li[data-indent="1"] { margin-left: 1.8em; }
+.rich-editor-area ul > li[data-indent="2"],
+.rich-editor-area ol > li[data-indent="2"],
+.note-rendered-content ul > li[data-indent="2"],
+.note-rendered-content ol > li[data-indent="2"] { margin-left: 3.6em; }
+.rich-editor-area ul > li[data-indent="3"],
+.rich-editor-area ol > li[data-indent="3"],
+.note-rendered-content ul > li[data-indent="3"],
+.note-rendered-content ol > li[data-indent="3"] { margin-left: 5.4em; }
+
+.rich-editor-area ul[data-type="taskList"] li > label,
+.note-rendered-content ul[data-type="taskList"] li > label {
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15.5px;
+  height: 15.5px;
+  min-width: 15.5px;
+  min-height: 15.5px;
+  margin-top: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] li > label input[type="checkbox"],
+.note-rendered-content ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15.5px;
+  height: 15.5px;
+  min-width: 15.5px;
+  min-height: 15.5px;
+  max-width: 15.5px;
+  max-height: 15.5px;
+  border: 1.6px solid var(--accent-primary, #6366f1);
+  border-radius: 4px;
+  background-color: rgba(99, 102, 241, 0.08);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s ease;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] li > label input[type="checkbox"]:hover,
+.note-rendered-content ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
+  border-color: var(--accent-hover, #818cf8);
+  background-color: rgba(99, 102, 241, 0.22);
+  box-shadow: 0 0 7px var(--border-focus, rgba(99, 102, 241, 0.45));
+}
+
+.rich-editor-area ul[data-type="taskList"] li > label input[type="checkbox"]:checked,
+.note-rendered-content ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background-color: var(--accent-primary, #6366f1);
+  border-color: var(--accent-primary, #6366f1);
+}
+
+.rich-editor-area ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after,
+.note-rendered-content ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 7.5px;
+  border: solid #ffffff;
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(45deg) translate(-0.5px, -0.5px);
+}
+
+.rich-editor-area ul[data-type="taskList"] li > div,
+.note-rendered-content ul[data-type="taskList"] li > div {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] li > div > p,
+.note-rendered-content ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}
+
+.rich-editor-area ul[data-type="taskList"] li[data-checked="true"] > div,
+.note-rendered-content ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.6;
+  color: var(--text-muted);
+}
+
+.rich-editor-area ul[data-type="taskList"] li[data-checked="true"] > div,
+.note-rendered-content ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.6;
+  color: var(--text-muted);
+}
 
 /* Excel Table Viewer Styles */
 .excel-table-container table {

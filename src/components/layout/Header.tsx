@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, ChevronDown, UserPlus, Check, Trash2 } from 'lucide-react';
+import { User, ChevronDown, UserPlus, Check, Trash2, Search, Command } from 'lucide-react';
 import type { UserProfile } from '../../types/index';
 
 interface HeaderProps {
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  onOpenGlobalSearch?: () => void;
   presetName?: string;
   activeUser?: UserProfile | null;
   users?: UserProfile[];
@@ -14,8 +15,9 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  searchQuery,
+  searchQuery = '',
   onSearchChange,
+  onOpenGlobalSearch,
   presetName,
   activeUser,
   users = [],
@@ -62,16 +64,51 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Global Quick Search Bar */}
-      <div style={styles.searchBox}>
-        <input
-          type="text"
-          placeholder="Pesquisar tickets, anotações ou lembretes..."
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="input-field"
-          style={styles.searchInput}
-        />
+      {/* Global Quick Search Bar (Interactive Trigger for Jira-Style Omnisearch) */}
+      <div
+        style={styles.searchBox}
+        onClick={() => onOpenGlobalSearch && onOpenGlobalSearch()}
+        title="Buscar tickets, anotações, arquivos, agenda, clientes... (Ctrl + K)"
+      >
+        <div
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 16px',
+            borderRadius: '12px',
+            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid var(--border-subtle)',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)' }}>
+            <Search size={16} color="var(--accent-primary)" />
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              Pesquisar em todo o app (tickets, notas, arquivos, agenda, clientes)...
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 7px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--border-subtle)',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: 'var(--text-muted)',
+            }}
+          >
+            <span>Ctrl</span>
+            <span>K</span>
+          </div>
+        </div>
       </div>
 
       {/* Right Controls (Theme & User Profile Dropdown) */}
@@ -151,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Alternar Usuário Ativo
               </div>
 
-              {users.map((u) => {
+              {Array.isArray(users) && users.filter((u) => u && u.id).map((u) => {
                 const isActive = activeUser?.id === u.id;
                 return (
                   <div
@@ -192,10 +229,10 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: '13px', fontWeight: '700', color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {u.name}
+                        {u.name || 'Usuário'}
                       </p>
                       <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {u.email}
+                        {u.email || ''}
                       </p>
                     </div>
                     {isActive && <Check size={16} color="var(--accent-primary)" />}

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { app, dialog, BrowserWindow } from 'electron';
-import { dbGetNotes, dbSaveNoteMeta, dbDeleteNoteMeta } from './database';
+import { app, dialog, BrowserWindow, shell } from 'electron';
+import { dbGetNotes, dbSaveNoteMeta, dbDeleteNoteMeta, dbGetNoteFolders, dbDeleteNoteFolder } from './database';
 import { NoteItem } from '../src/types/index';
 
 export function getNotesDir(): string {
@@ -11,6 +11,51 @@ export function getNotesDir(): string {
     fs.mkdirSync(notesDir, { recursive: true });
   }
   return notesDir;
+}
+
+export async function getPhysicalFolderPath(folderId?: string): Promise<string> {
+  const notesDir = getNotesDir();
+  if (!folderId) return notesDir;
+
+  const folders = await dbGetNoteFolders();
+  const folderMap = new Map(folders.map((f) => [f.id, f]));
+
+  const segments: string[] = [];
+  let curr: string | undefined = folderId;
+  const visited = new Set<string>();
+
+  while (curr && !visited.has(curr)) {
+    visited.add(curr);
+    const f = folderMap.get(curr);
+    if (!f) break;
+    const safeName = f.name.replace(/[<>:"/\\|?*]/g, '_').trim() || 'pasta';
+    segments.unshift(safeName);
+    curr = f.parentId;
+  }
+
+  const targetPath = path.join(notesDir, ...segments);
+  if (!fs.existsSync(targetPath)) {
+    fs.mkdirSync(targetPath, { recursive: true });
+  }
+  return targetPath;
+}
+
+export async function openNoteFolder(folderId?: string): Promise<boolean> {
+  try {
+    const targetDir = await getPhysicalFolderPath(folderId);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const err = await shell.openPath(targetDir);
+    if (err) {
+      console.error('[openNoteFolder error]:', err);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[openNoteFolder exception]:', e);
+    return false;
+  }
 }
 
 export async function listNotes(): Promise<NoteItem[]> {
@@ -31,11 +76,11 @@ export function readNoteContent(filePath: string): string {
   return fs.readFileSync(filePath, 'utf-8');
 }
 
-export async function createNote(title: string): Promise<NoteItem> {
-  const notesDir = getNotesDir();
+export async function createNote(title: string, folderId?: string): Promise<NoteItem> {
+  const targetDir = await getPhysicalFolderPath(folderId);
   const sanitizedTitle = title.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
   const fileName = `${sanitizedTitle || 'notaanonima'}_${Date.now()}.md`;
-  const filePath = path.join(notesDir, fileName);
+  const filePath = path.join(targetDir, fileName);
 
   const initialContent = `# ${title}\n\nEscreva suas anotações aqui...`;
   fs.writeFileSync(filePath, initialContent, 'utf-8');
@@ -43,6 +88,7 @@ export async function createNote(title: string): Promise<NoteItem> {
   return await dbSaveNoteMeta({
     title,
     filePath,
+    folderId,
   });
 }
 
@@ -50,15 +96,42 @@ export async function saveNoteContent(filePath: string, title: string, content: 
   const ext = (filePath.split('.').pop() || '').toLowerCase();
   const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) || filePath.includes(path.join('notes', 'files'));
 
-  if (!isBinaryFile && fs.existsSync(path.dirname(filePath))) {
+  if (!isBinaryFile) {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     fs.writeFileSync(filePath, content, 'utf-8');
   }
 
   return await dbSaveNoteMeta({
     title,
     filePath,
-    format: isBinaryFile ? 'file' : undefined,
+    format: isBinaryFile ? 'file' : 'richtext',
   });
+}
+
+export async function updateNoteMetaAndMoveFile(noteMeta: Partial<NoteItem> & { id: string }): Promise<NoteItem> {
+  const notes = await dbGetNotes();
+  const existing = notes.find((n) => n.id === noteMeta.id);
+
+  if (existing && noteMeta.folderId !== undefined && noteMeta.folderId !== existing.folderId) {
+    try {
+      const newTargetDir = await getPhysicalFolderPath(noteMeta.folderId);
+      if (existing.filePath && fs.existsSync(existing.filePath)) {
+        const fileName = path.basename(existing.filePath);
+        const newFilePath = path.join(newTargetDir, fileName);
+        if (existing.filePath !== newFilePath) {
+          fs.renameSync(existing.filePath, newFilePath);
+          noteMeta.filePath = newFilePath;
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao mover arquivo de nota física:', err);
+    }
+  }
+
+  return await dbSaveNoteMeta(noteMeta);
 }
 
 export async function deleteNote(id: string): Promise<boolean> {
@@ -121,11 +194,11 @@ export async function exportNoteAsTxt(content: string, defaultTitle: string): Pr
   return true;
 }
 
-export async function createRichNote(title: string): Promise<NoteItem> {
-  const notesDir = getNotesDir();
+export async function createRichNote(title: string, folderId?: string): Promise<NoteItem> {
+  const targetDir = await getPhysicalFolderPath(folderId);
   const sanitizedTitle = title.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
   const fileName = `${sanitizedTitle || 'notaanonima'}_${Date.now()}.html`;
-  const filePath = path.join(notesDir, fileName);
+  const filePath = path.join(targetDir, fileName);
 
   // Initial empty HTML content for Tiptap
   const initialContent = `<h1>${title}</h1><p>Escreva suas anotações aqui...</p>`;
@@ -135,6 +208,7 @@ export async function createRichNote(title: string): Promise<NoteItem> {
     title,
     filePath,
     format: 'richtext',
+    folderId,
   });
 }
 
@@ -157,19 +231,15 @@ export async function saveNoteImage(base64Data: string, ext: string): Promise<st
     : `data:image/${ext || 'png'};base64,${base64Clean}`;
 }
 
-export async function saveFileNote(fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number }): Promise<NoteItem> {
-  const notesDir = getNotesDir();
-  const filesDir = path.join(notesDir, 'files');
-  if (!fs.existsSync(filesDir)) {
-    fs.mkdirSync(filesDir, { recursive: true });
-  }
+export async function saveFileNote(fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number; folderId?: string }): Promise<NoteItem> {
+  const targetDir = await getPhysicalFolderPath(fileData.folderId);
 
   const ext = (fileData.fileName.split('.').pop() || '').toLowerCase();
   const sanitized = fileData.fileName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
   const diskFileName = `${Date.now()}_${sanitized}`;
-  const diskPath = path.join(filesDir, diskFileName);
+  const diskPath = path.join(targetDir, diskFileName);
 
-  // Write file buffer to disk permanently in app data folder
+  // Write file buffer to disk permanently in folder directory
   const buffer = Buffer.from(fileData.base64, 'base64');
   fs.writeFileSync(diskPath, buffer);
 
@@ -189,6 +259,7 @@ export async function saveFileNote(fileData: { title: string; fileName: string; 
     originalFileName: fileData.fileName,
     fileSize: fileData.size,
     mimeType: fileData.mimeType,
+    folderId: fileData.folderId,
   });
 }
 
@@ -237,4 +308,57 @@ export async function pickLocalFile(): Promise<{ filePath: string; fileName: str
     base64,
     size: stat.size,
   };
+}
+
+export async function deleteNoteFolderService(id: string, deleteContents: boolean = false): Promise<boolean> {
+  const folders = await dbGetNoteFolders();
+  const folder = folders.find((f) => f.id === id);
+  const targetParent = folder?.parentId || '';
+
+  try {
+    const folderPath = await getPhysicalFolderPath(id);
+
+    if (deleteContents) {
+      // 1. Delete folder and all contents from filesystem
+      if (fs.existsSync(folderPath)) {
+        fs.rmSync(folderPath, { recursive: true, force: true });
+      }
+      // 2. Delete folder and all child notes/folders from DB
+      await dbDeleteNoteFolder(id, true);
+    } else {
+      // 1. Move all files and folders to parent directory
+      const parentFolderPath = await getPhysicalFolderPath(targetParent);
+      if (fs.existsSync(folderPath)) {
+        const entries = fs.readdirSync(folderPath);
+        for (const entry of entries) {
+          const srcPath = path.join(folderPath, entry);
+          const destPath = path.join(parentFolderPath, entry);
+          try {
+            if (fs.existsSync(destPath)) {
+              const ext = path.extname(entry);
+              const base = path.basename(entry, ext);
+              const safeDest = path.join(parentFolderPath, `${base}_${Date.now()}${ext}`);
+              fs.renameSync(srcPath, safeDest);
+            } else {
+              fs.renameSync(srcPath, destPath);
+            }
+          } catch (err) {
+            console.error('[Move on folder delete error]:', err);
+          }
+        }
+        // Remove empty directory
+        try {
+          fs.rmdirSync(folderPath);
+        } catch (e) {
+          try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (_) {}
+        }
+      }
+      // 2. Update DB
+      await dbDeleteNoteFolder(id, false);
+    }
+    return true;
+  } catch (err) {
+    console.error('[deleteNoteFolderService error]:', err);
+    return false;
+  }
 }

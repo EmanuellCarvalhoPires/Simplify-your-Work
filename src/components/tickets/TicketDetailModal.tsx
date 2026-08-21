@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { marked } from 'marked';
 import type { Ticket, TicketStatus, JiraInstance, NoteItem } from '../../types/index';
+import { FileViewerModal } from '../common/FileViewerModal';
 import {
   Trash2,
   X,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   Edit2,
   Check,
+  CheckCircle2,
   Calendar,
   Tag as TagIcon,
   AlertCircle,
@@ -26,6 +28,8 @@ import {
   FileCode,
   Eye,
   BookOpen,
+  Lock,
+  Globe,
 } from 'lucide-react';
 
 interface TicketDetailModalProps {
@@ -38,8 +42,10 @@ interface TicketDetailModalProps {
   onDeleteTicket: (ticketId: string) => Promise<void>;
   onSaveTicket?: (ticket: Partial<Ticket>) => Promise<void>;
   onSyncJiraTicket?: (ticketKey: string, instanceId: string) => Promise<void>;
-  onAddComment?: (ticketId: string, author: string, body: string) => Promise<void>;
+  onAddComment?: (ticketId: string, author: string, body: string, isInternal?: boolean) => Promise<void>;
+  onDeleteComment?: (ticketId: string, commentId: string) => Promise<void>;
   onOpenLinkedTicket?: (ticket: Ticket) => void;
+  onNavigateToNote?: (noteId: string) => void;
 }
 
 export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
@@ -53,11 +59,17 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   onSaveTicket,
   onSyncJiraTicket,
   onAddComment,
+  onDeleteComment,
   onOpenLinkedTicket,
+  onNavigateToNote,
 }) => {
   const [currentStatus, setCurrentStatus] = useState<TicketStatus>(ticket.status);
   const [newCommentText, setNewCommentText] = useState('');
+  const [isInternalComment, setIsInternalComment] = useState(true);
   const [isCommentFocused, setIsCommentFocused] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [sendingCommentId, setSendingCommentId] = useState<string | null>(null);
+  const [commentNotice, setCommentNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [copiedCommentId, setCopiedCommentId] = useState<string | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -87,6 +99,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
   // Note Content Viewer Modal State
   const [previewNote, setPreviewNote] = useState<NoteItem | null>(null);
+  const [previewFileNote, setPreviewFileNote] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [loadingNote, setLoadingNote] = useState(false);
 
@@ -180,14 +193,32 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
   const handleAddCommentSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newCommentText.trim() || !onAddComment) return;
+    if (!newCommentText.trim() || isSubmittingComment || !onAddComment) return;
+
+    const textToSend = newCommentText.trim();
+    setIsSubmittingComment(true);
+    setCommentNotice(null);
 
     try {
-      await onAddComment(ticket.id, 'Eu (Você)', newCommentText.trim());
+      await onAddComment(ticket.id, 'Eu (Você)', textToSend, isInternalComment);
       setNewCommentText('');
       setIsCommentFocused(false);
-    } catch (err) {
-      console.error(err);
+      setCommentNotice({
+        type: 'success',
+        message: isJira
+          ? `${isInternalComment ? 'Nota interna enviada' : 'Comentário externo enviado'} com sucesso para o Jira!`
+          : 'Comentário salvo com sucesso!',
+      });
+      setTimeout(() => setCommentNotice(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao adicionar comentário:', err);
+      setCommentNotice({
+        type: 'error',
+        message: `Falha ao sincronizar com o Jira (${err.message || 'Erro de conexão'}). O comentário foi mantido localmente.`,
+      });
+      setTimeout(() => setCommentNotice(null), 8000);
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -208,6 +239,61 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     setTimeout(() => {
       setCopiedCommentId((prev) => (prev === commentId ? null : prev));
     }, 2000);
+  };
+
+  const handleDeleteLocalComment = async (commentId: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir este comentário local?')) return;
+    try {
+      if (onDeleteComment) {
+        await onDeleteComment(ticket.id, commentId);
+      } else if (onSaveTicket) {
+        const updatedComments = (ticket.comments || []).filter((c) => c.id !== commentId);
+        await handleSaveField({ comments: updatedComments });
+      }
+    } catch (err) {
+      console.error('Erro ao excluir comentário local:', err);
+    }
+  };
+
+  const handleSendLocalCommentToJira = async (commentToSync: { id: string; body: string; isInternal?: boolean }) => {
+    if (!isJira || !ticket.key || !window.electronAPI?.addJiraComment || sendingCommentId) return;
+
+    setSendingCommentId(commentToSync.id);
+    setCommentNotice(null);
+
+    try {
+      const res = await window.electronAPI.addJiraComment({
+        ticketId: ticket.id,
+        ticketKey: ticket.key,
+        instanceId: ticket.jiraInstanceId,
+        commentBody: commentToSync.body,
+        isInternal: commentToSync.isInternal ?? true,
+      });
+
+      // Substitui o comentário local pelo novo comentário remoto retornado pela API do Jira (isLocal: false)
+      const remoteComment = { ...res.comment, isLocal: false };
+      const otherComments = (ticket.comments || []).filter(
+        (c) => c.id !== commentToSync.id && c.id !== remoteComment.id
+      );
+      const updatedComments = [remoteComment, ...otherComments];
+      updatedComments.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+      await handleSaveField({ comments: updatedComments });
+      setCommentNotice({
+        type: 'success',
+        message: 'Comentário enviado com sucesso para o Jira e agora é um comentário JIRA!',
+      });
+      setTimeout(() => setCommentNotice(null), 5000);
+    } catch (err: any) {
+      console.error('Erro ao enviar comentário local para o Jira:', err);
+      setCommentNotice({
+        type: 'error',
+        message: `Falha ao sincronizar com o Jira (${err.message || 'Erro de conexão'}). O comentário foi mantido localmente.`,
+      });
+      setTimeout(() => setCommentNotice(null), 8000);
+    } finally {
+      setSendingCommentId(null);
+    }
   };
 
   const handleAddLabelSubmit = async (e: React.FormEvent) => {
@@ -301,13 +387,22 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     return ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
   };
 
-  // Read & Preview Markdown Note Content or open File Viewer for attachments
+  const handleGoToNote = (noteId: string) => {
+    if (onNavigateToNote) {
+      onClose();
+      onNavigateToNote(noteId);
+    }
+  };
+
+  // Read & Preview Note Content (Markdown, RichText or File Viewer)
   const handleOpenNotePreview = async (note: NoteItem) => {
     if (checkIsFileNote(note)) {
       if ((window as any).openFileViewer) {
         (window as any).openFileViewer(note.filePath);
-        return;
+      } else {
+        setPreviewFileNote(note.filePath);
       }
+      return;
     }
 
     setPreviewNote(note);
@@ -373,6 +468,28 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               <CheckSquare size={14} color="#3b82f6" />
               <span>{ticket.key || 'TASK-1'}</span>
             </div>
+
+            {/* Badge de Status do Jira */}
+            {(isJira || ticket.jiraStatus || ticket.statusLabel) && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '3px 10px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  color: '#38bdf8',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                }}
+                title="Status oficial da issue no Jira"
+              >
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#38bdf8' }} />
+                <span>Jira: {ticket.jiraStatus || ticket.statusLabel || 'A Fazer'}</span>
+              </div>
+            )}
 
             {jiraUrl && (
               <button
@@ -572,23 +689,72 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                         <div
                           style={styles.linkedTicketClickableArea}
                           onClick={() => handleOpenNotePreview(note)}
-                          title="Clique para visualizar o conteúdo desta anotação"
+                          title="Clique para visualizar a prévia desta anotação"
                         >
                           <FileText size={15} color="#c084fc" />
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#f8fafc' }}>
                             {note.title}
                           </span>
+                          {note.format === 'file' ? (
+                            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.08)', color: '#94a3b8', fontWeight: '600' }}>
+                              Arquivo
+                            </span>
+                          ) : note.format === 'richtext' ? (
+                            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(192,132,252,0.15)', color: '#c084fc', fontWeight: '600' }}>
+                              RichText
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: '600' }}>
+                              Markdown
+                            </span>
+                          )}
                         </div>
-                        <button
-                          style={styles.unlinkBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUnlinkNote(note.id);
-                          }}
-                          title="Remover referência desta anotação"
-                        >
-                          <Unlink size={13} />
-                        </button>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            style={styles.actionNoteBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenNotePreview(note);
+                            }}
+                            title="Visualizar Prévia da Anotação"
+                          >
+                            <Eye size={13} color="#94a3b8" />
+                            <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: '600' }}>Prévia</span>
+                          </button>
+
+                          {onNavigateToNote && (
+                            <button
+                              type="button"
+                              style={{
+                                ...styles.actionNoteBtn,
+                                backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                                borderColor: 'rgba(99, 102, 241, 0.4)',
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleGoToNote(note.id);
+                              }}
+                              title="Ir para o Editor e abrir esta Anotação"
+                            >
+                              <ExternalLink size={13} color="#a5b4fc" />
+                              <span style={{ fontSize: '11px', fontWeight: '700', color: '#c7d2fe' }}>Ir para Anotação</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            style={styles.unlinkBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnlinkNote(note.id);
+                            }}
+                            title="Remover referência desta anotação"
+                          >
+                            <Unlink size={13} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -614,26 +780,100 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               {/* Comment Input Box */}
               {onAddComment && (
                 <form onSubmit={handleAddCommentSubmit} style={styles.commentFormBox}>
+                  {commentNotice && (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        marginBottom: '10px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        backgroundColor:
+                          commentNotice.type === 'success'
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : 'rgba(239, 68, 68, 0.15)',
+                        color: commentNotice.type === 'success' ? '#10b981' : '#f87171',
+                        border: `1px solid ${
+                          commentNotice.type === 'success'
+                            ? 'rgba(16, 185, 129, 0.3)'
+                            : 'rgba(239, 68, 68, 0.3)'
+                        }`,
+                      }}
+                    >
+                      {commentNotice.type === 'success' ? (
+                        <CheckCircle2 size={15} color="#10b981" />
+                      ) : (
+                        <AlertCircle size={15} color="#f87171" />
+                      )}
+                      <span>{commentNotice.message}</span>
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <div style={styles.userAvatarBox}>
                       <User size={16} color="#ffffff" />
                     </div>
                     <div style={{ flex: 1 }}>
+                      {/* Seletor de Tipo de Comentário: Nota Interna (Padrão) vs Resposta ao Cliente / Externo */}
+                      {isJira && (
+                        <div style={styles.commentTypeTabs}>
+                          <button
+                            type="button"
+                            onClick={() => setIsInternalComment(true)}
+                            style={{
+                              ...styles.commentTypeTab,
+                              ...(isInternalComment ? styles.commentTypeTabActiveInternal : {}),
+                            }}
+                            title="Nota interna: visível apenas para agentes e equipe técnica no Jira Service Management / Jira"
+                          >
+                            <Lock size={12} />
+                            <span>Nota Interna (Padrão)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsInternalComment(false)}
+                            style={{
+                              ...styles.commentTypeTab,
+                              ...(!isInternalComment ? styles.commentTypeTabActiveExternal : {}),
+                            }}
+                            title="Resposta ao cliente / Comentário público: visível para o cliente no portal do Jira e por e-mail"
+                          >
+                            <Globe size={12} />
+                            <span>Resposta ao Cliente (Externo)</span>
+                          </button>
+                        </div>
+                      )}
+
                       <textarea
                         style={{
                           ...styles.commentTextarea,
                           height: isCommentFocused ? '100px' : '44px',
+                          borderColor: isJira
+                            ? isInternalComment
+                              ? 'rgba(245, 158, 11, 0.35)'
+                              : 'rgba(14, 165, 233, 0.35)'
+                            : undefined,
                         }}
-                        placeholder="Add a comment... (Pressione Ctrl + Enter para enviar)"
+                        placeholder={
+                          isJira
+                            ? isInternalComment
+                              ? `Adicionar nota interna... Visível apenas para a equipe interna (${ticket.key})`
+                              : `Responder ao cliente... Visível para o cliente e público no Jira (${ticket.key})`
+                            : 'Adicionar comentário... (Pressione Ctrl + Enter para enviar)'
+                        }
                         value={newCommentText}
                         onChange={(e) => setNewCommentText(e.target.value)}
                         onFocus={() => setIsCommentFocused(true)}
                         onKeyDown={handleCommentKeyDown}
+                        disabled={isSubmittingComment}
                         rows={isCommentFocused ? 4 : 2}
                       />
 
                       {/* Quick Comment Response Chips */}
-                      {!isCommentFocused && (
+                      {!isCommentFocused && !isSubmittingComment && (
                         <div style={styles.quickChipsRow}>
                           <button
                             type="button"
@@ -661,13 +901,20 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
                       {/* Send Button & Shortcut Hint */}
                       <div style={styles.commentActionRow}>
-                        <span style={styles.proTipText}>Pro tip: press <b>Ctrl + Enter</b> to comment</span>
+                        <span style={styles.proTipText}>
+                          {isJira
+                            ? isInternalComment
+                              ? '🔒 Envio como Nota Interna no Jira (equipe interna)'
+                              : '🌐 Envio como Resposta Externa no Jira (público)'
+                            : 'Pro tip: press Ctrl + Enter to comment'}
+                        </span>
                         <div style={{ display: 'flex', gap: '8px' }}>
                           {isCommentFocused && (
                             <button
                               type="button"
                               className="btn btn-secondary"
                               style={{ padding: '4px 10px', fontSize: '12px' }}
+                              disabled={isSubmittingComment}
                               onClick={() => {
                                 setIsCommentFocused(false);
                               }}
@@ -678,10 +925,43 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                           <button
                             type="submit"
                             className="btn btn-primary"
-                            style={styles.sendCommentBtn}
-                            disabled={!newCommentText.trim()}
+                            style={{
+                              ...styles.sendCommentBtn,
+                              ...(isJira && isInternalComment
+                                ? { backgroundColor: '#d97706', borderColor: '#b45309' }
+                                : {}),
+                              ...(isSubmittingComment ? { opacity: 0.7, cursor: 'not-allowed' } : {}),
+                            }}
+                            disabled={!newCommentText.trim() || isSubmittingComment}
                           >
-                            <Send size={13} /> Comment
+                            {isSubmittingComment ? (
+                              <>
+                                <RefreshCw size={13} className="animate-spin" />{' '}
+                                {isJira
+                                  ? isInternalComment
+                                    ? 'Enviando Nota Interna...'
+                                    : 'Enviando ao Cliente...'
+                                  : 'Salvando...'}
+                              </>
+                            ) : (
+                              <>
+                                {isJira ? (
+                                  isInternalComment ? (
+                                    <>
+                                      <Lock size={13} /> Enviar Nota Interna
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Globe size={13} /> Enviar Resposta Externa
+                                    </>
+                                  )
+                                ) : (
+                                  <>
+                                    <Send size={13} /> Comentar
+                                  </>
+                                )}
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -693,47 +973,105 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               {/* Rendered Comments List */}
               <div style={styles.commentsListContainer}>
                 {sortedComments.length > 0 ? (
-                  sortedComments.map((c) => (
-                    <div key={c.id} style={styles.jiraCommentCard}>
-                      <div style={styles.jiraCommentHeader}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={styles.commentAvatarMini}>
-                            {c.author ? c.author.charAt(0).toUpperCase() : 'U'}
-                          </div>
-                          <span style={styles.jiraCommentAuthor}>{c.author}</span>
-                          {c.isLocal || (c.id && String(c.id).startsWith('comm_')) ? (
-                            <span style={styles.localCommentBadge} title="Comentário feito localmente no App">LOCAL</span>
-                          ) : (
-                            <span style={styles.jiraCommentBadge} title="Comentário sincronizado da API do Jira Cloud">JIRA</span>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={styles.jiraCommentTime}>
-                            {new Date(c.created).toLocaleString('pt-BR')}
-                          </span>
-                          <button
-                            type="button"
-                            style={styles.copyCommentBtn}
-                            onClick={() => handleCopyComment(c.id, c.body)}
-                            title="Copiar texto do comentário"
-                          >
-                            {copiedCommentId === c.id ? (
-                              <>
-                                <Check size={12} color="#10b981" />
-                                <span style={{ fontSize: '11px', color: '#10b981', fontWeight: '600' }}>Copiado!</span>
-                              </>
+                  sortedComments.map((c) => {
+                    const isCommentLocal = isJira ? Boolean(c.isLocal) : true;
+                    const isSendingThisComment = sendingCommentId === c.id;
+
+                    return (
+                      <div key={c.id} style={styles.jiraCommentCard}>
+                        <div style={styles.jiraCommentHeader}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={styles.commentAvatarMini}>
+                              {c.author ? c.author.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                            <span style={styles.jiraCommentAuthor}>{c.author}</span>
+                            {isCommentLocal ? (
+                              <span style={styles.localCommentBadge} title="Comentário registrado localmente">LOCAL</span>
                             ) : (
-                              <>
-                                <Copy size={12} />
-                                <span style={{ fontSize: '11px' }}>Copiar</span>
-                              </>
+                              <span style={styles.jiraCommentBadge} title="Comentário sincronizado na API do Jira Cloud / Server">JIRA</span>
                             )}
-                          </button>
+                            {c.isInternal !== undefined ? (
+                              c.isInternal ? (
+                                <span style={styles.internalCommentBadge} title="Nota Interna no Jira (visível apenas para a equipe)">
+                                  <Lock size={10} /> INTERNO
+                                </span>
+                              ) : (
+                                <span style={styles.externalCommentBadge} title="Comentário Público / Externo no Jira (visível para o cliente)">
+                                  <Globe size={10} /> EXTERNO
+                                </span>
+                              )
+                            ) : null}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={styles.jiraCommentTime}>
+                              {new Date(c.created).toLocaleString('pt-BR')}
+                            </span>
+
+                            {/* Botão de Copiar Texto */}
+                            <button
+                              type="button"
+                              style={styles.copyCommentBtn}
+                              onClick={() => handleCopyComment(c.id, c.body)}
+                              title="Copiar texto do comentário"
+                            >
+                              {copiedCommentId === c.id ? (
+                                <>
+                                  <Check size={12} color="#10b981" />
+                                  <span style={{ fontSize: '11px', color: '#10b981', fontWeight: '600' }}>Copiado!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={12} />
+                                  <span style={{ fontSize: '11px' }}>Copiar</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Botão para enviar comentário local pendente diretamente ao Jira */}
+                            {isCommentLocal && isJira && ticket.key && (
+                              <button
+                                type="button"
+                                style={{
+                                  ...styles.sendLocalToJiraBtn,
+                                  ...(isSendingThisComment ? { opacity: 0.7, cursor: 'not-allowed' } : {}),
+                                }}
+                                onClick={() => handleSendLocalCommentToJira(c)}
+                                disabled={isSendingThisComment}
+                                title="Enviar este comentário local para a API do Jira"
+                              >
+                                {isSendingThisComment ? (
+                                  <>
+                                    <RefreshCw size={11} className="animate-spin" />
+                                    <span style={{ fontSize: '11px' }}>Enviando...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send size={11} />
+                                    <span style={{ fontSize: '11px' }}>Enviar ao Jira</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+
+                            {/* Botão de Excluir Comentário Local */}
+                            {isCommentLocal && (
+                              <button
+                                type="button"
+                                style={styles.deleteCommentBtn}
+                                onClick={() => handleDeleteLocalComment(c.id)}
+                                disabled={isSendingThisComment}
+                                title="Excluir este comentário local"
+                              >
+                                <Trash2 size={12} />
+                                <span style={{ fontSize: '11px' }}>Excluir</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
+                        <p style={styles.jiraCommentBody}>{c.body}</p>
                       </div>
-                      <p style={styles.jiraCommentBody}>{c.body}</p>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic', padding: '8px 0' }}>
                     No comments recorded yet.
@@ -777,6 +1115,33 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
               {isDetailsOpen && (
                 <div style={styles.detailsContentGrid}>
+                  {/* Jira Status Field (Read-only from Jira API) */}
+                  {(ticket.source === 'JIRA' || ticket.jiraStatus) && (
+                    <div style={styles.detailRow}>
+                      <span style={styles.detailLabel}>Status no Jira</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '3px 9px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                          }}
+                          title="Status atual da issue no Jira (puxado via API)"
+                        >
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#38bdf8' }} />
+                          {ticket.jiraStatus || ticket.statusLabel || 'A Fazer'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Assignee Field */}
                   <div style={styles.detailRow}>
                     <span style={styles.detailLabel}>Assignee</span>
@@ -1081,24 +1446,78 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
       {/* Note Content Reader Modal Popup */}
       {previewNote && (
         <div style={styles.pickerOverlay} onClick={() => setPreviewNote(null)}>
-          <div style={{ ...styles.pickerModal, width: '860px', height: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+          <div
+            style={{
+              ...styles.pickerModal,
+              width: '900px',
+              maxWidth: '92vw',
+              height: '82vh',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={styles.pickerHeader}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <BookOpen size={18} color="#c084fc" />
-                <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: '#ffffff' }}>
-                  {previewNote.title}
-                </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ padding: '6px', borderRadius: '8px', backgroundColor: 'rgba(192, 132, 252, 0.15)' }}>
+                  <FileText size={18} color="#c084fc" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: '#ffffff' }}>
+                    {previewNote.title}
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Prévia da anotação vinculada ao ticket
+                  </span>
+                </div>
               </div>
-              <button className="btn-icon" onClick={() => setPreviewNote(null)}>
-                <X size={16} />
-              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {onNavigateToNote && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      fontSize: '12px',
+                      padding: '6px 14px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      borderRadius: '8px',
+                      backgroundColor: '#6366f1',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => {
+                      const noteId = previewNote.id;
+                      setPreviewNote(null);
+                      handleGoToNote(noteId);
+                    }}
+                    title="Abrir esta anotação em tela cheia no Editor"
+                  >
+                    <ExternalLink size={14} /> Ir para a Anotação
+                  </button>
+                )}
+
+                <button className="btn-icon" onClick={() => setPreviewNote(null)} title="Fechar Prévia">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div style={{ padding: '24px 28px', flex: 1, overflowY: 'auto' }}>
               {loadingNote ? (
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
-                  Carregando arquivo da anotação...
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
+                  Carregando conteúdo da anotação...
                 </div>
+              ) : previewNote.format === 'richtext' || (previewContent && previewContent.trim().startsWith('<')) ? (
+                <div
+                  className="tiptap-content-preview"
+                  style={{ color: '#e2e8f0', lineHeight: 1.7, fontSize: '14px' }}
+                  dangerouslySetInnerHTML={{ __html: previewContent || '<p style="color: #64748b">Anotação vazia.</p>' }}
+                />
               ) : (
                 <div
                   className="markdown-body"
@@ -1109,6 +1528,14 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* File Attachment Viewer Modal */}
+      {previewFileNote && (
+        <FileViewerModal
+          filePath={previewFileNote}
+          onClose={() => setPreviewFileNote(null)}
+        />
       )}
     </div>
   );
@@ -1262,6 +1689,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '700',
     color: '#ffffff',
     margin: 0,
+  },
+  actionNoteBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '4px 8px',
+    borderRadius: '6px',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
   },
   inlineEditBtn: {
     fontSize: '12px',
@@ -1592,6 +2030,64 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     letterSpacing: '0.04em',
   },
+  internalCommentBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    fontSize: '10px',
+    fontWeight: '800',
+    padding: '1px 6px',
+    borderRadius: '4px',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    color: '#fbbf24',
+    border: '1px solid rgba(245, 158, 11, 0.35)',
+    letterSpacing: '0.03em',
+  },
+  externalCommentBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    fontSize: '10px',
+    fontWeight: '800',
+    padding: '1px 6px',
+    borderRadius: '4px',
+    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+    color: '#38bdf8',
+    border: '1px solid rgba(14, 165, 233, 0.35)',
+    letterSpacing: '0.03em',
+  },
+  commentTypeTabs: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginBottom: '8px',
+  },
+  commentTypeTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '5px 12px',
+    borderRadius: '6px',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    color: 'var(--text-muted, #94a3b8)',
+    fontSize: '12px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  commentTypeTabActiveInternal: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    border: '1px solid rgba(245, 158, 11, 0.45)',
+    color: '#fbbf24',
+    boxShadow: '0 0 10px rgba(245, 158, 11, 0.12)',
+  },
+  commentTypeTabActiveExternal: {
+    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+    border: '1px solid rgba(14, 165, 233, 0.45)',
+    color: '#38bdf8',
+    boxShadow: '0 0 10px rgba(14, 165, 233, 0.12)',
+  },
   jiraCommentTime: {
     fontSize: '11px',
     color: 'var(--text-muted)',
@@ -1606,6 +2102,31 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
     color: 'var(--text-secondary)',
     cursor: 'pointer',
+  },
+  deleteCommentBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    color: '#f87171',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  sendLocalToJiraBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    border: '1px solid rgba(56, 189, 248, 0.35)',
+    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+    color: '#38bdf8',
+    cursor: 'pointer',
+    fontWeight: '600',
+    transition: 'all 0.2s ease',
   },
   jiraCommentBody: {
     fontSize: '13px',

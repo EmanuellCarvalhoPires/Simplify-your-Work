@@ -1,0 +1,20 @@
+# REGRAS OBRIGATÓRIAS DO WORKSPACE (AGENTE IA)
+
+## 1. REGRA DE OURO: DOCUMENTAÇÃO OBRIGATÓRIA DE FUNCIONALIDADES
+Toda e qualquer alteração de código, criação de arquivos, refatoração ou adição de features no projeto DEVE OBRIGATORIAMENTE ser acompanhada da criação ou atualização do respectivo arquivo Markdown em `.agent/funcionalidades/`.
+
+### Protocolo de Execução Obrigatório a Cada Modificação:
+1. Identificar o Módulo Afetado: Localize o arquivo correspondente em `.agent/funcionalidades/<nome_da_funcionalidade>.md`.
+2. Atualizar / Criar o Markdown Imediatamente: Na mesma resposta em que o código for alterado, você DEVE editar ou criar o Markdown daquela funcionalidade.
+3. Estrutura Obrigatória:
+   - 1. Descrição e Propósito
+   - 2. Impacto no Banco de Dados (Coleções afetadas, esquemas, CRUD)
+   - 3. Histórico de Versões e Modificações (Tabela com Versão, Data, Autor e Detalhamento da alteração)
+4. Atualizar o Catálogo: Adicione ou atualize o link em `.agent/funcionalidades/README.md`.
+
+## 2. CONSULTA AO CONTEXTO
+Antes de propor diagnósticos ou planos, consulte os arquivos da pasta `.agent/`.
+
+## 3. PADRÕES DE RESPOSTA
+- Use links Markdown clicáveis com caminho absoluto (file:///) para todos os arquivos mencionados.
+- Responda em Português.

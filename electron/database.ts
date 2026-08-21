@@ -1,732 +1,14 @@
-import mongoose from 'mongoose';
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import { app } from 'electron';
 import Store from 'electron-store';
-import type { Ticket, JiraInstance, Reminder, NoteItem, UserProfile, ThemeConfig } from '../src/types/index';
+import type { Ticket, JiraInstance, Reminder, NoteItem, UserProfile, ThemeConfig, NoteFolder, ClientAsset } from '../src/types/index';
 
 const store = new Store();
-let isMongoConnected = false;
-let currentMongoUri = (store.get('mongodb_uri') as string) || 'mongodb://127.0.0.1:27017/simplify_work';
+let db: Database.Database | null = null;
+let dbFilePath = '';
 
-// === MONGOOSE SCHEMAS ===
-const JiraInstanceSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  domain: { type: String, required: true },
-  email: { type: String, required: true },
-  apiToken: { type: String, required: true },
-  authType: { type: String, default: 'API_TOKEN' },
-  accessToken: { type: String, default: '' },
-  refreshToken: { type: String, default: '' },
-  cloudId: { type: String, default: '' },
-  avatarUrl: { type: String, default: '' },
-});
-
-const CommentSchema = new mongoose.Schema(
-  {
-    id: { type: String, required: true },
-    author: { type: String, default: 'Eu' },
-    body: { type: String, default: '' },
-    created: { type: String, required: true },
-    isLocal: { type: Boolean, default: false },
-  },
-  { _id: false }
-);
-
-const TicketSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  key: { type: String, default: '' },
-  source: { type: String, required: true, default: 'LOCAL' },
-  title: { type: String, required: true },
-  description: { type: String, default: '' },
-  status: { type: String, required: true, default: 'TO_DO' },
-  statusLabel: { type: String, default: 'A Fazer' },
-  color: { type: String, default: '#3b82f6' },
-  labels: { type: [String], default: [] },
-  comments: [CommentSchema],
-  priority: { type: String, default: 'Normal' },
-  assignee: { type: String, default: 'Eu' },
-  reporter: { type: String, default: 'Eu' },
-  startDate: { type: String, default: '' },
-  dueDate: { type: String, default: '' },
-  jiraInstanceId: { type: String, default: '' },
-  linkedTicketIds: { type: [String], default: [] },
-  linkedNoteIds: { type: [String], default: [] },
-  updatedAt: { type: String, required: true },
-  createdAt: { type: String, required: true },
-});
-
-const ReminderSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  eventId: { type: String, default: '' },
-  title: { type: String, required: true },
-  message: { type: String, required: true },
-  recurrence: { type: String, required: true, default: 'INTERVAL' },
-  intervalMinutes: { type: Number, default: 45 },
-  scheduledTime: { type: String, default: '' },
-  enabled: { type: Boolean, default: true },
-  lastTriggered: { type: String, default: '' },
-  createdAt: { type: String, required: true },
-});
-
-const NoteSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  title: { type: String, required: true },
-  filePath: { type: String, required: true },
-  updatedAt: { type: String, required: true },
-  format: { type: String, default: 'richtext' },
-  fileType: { type: String },
-  originalFileName: { type: String },
-  fileSize: { type: Number },
-  mimeType: { type: String },
-});
-
-const SavedJqlQuerySchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  jql: { type: String, required: true },
-  jiraInstanceId: { type: String, required: true },
-  createdAt: { type: String, required: true },
-});
-
-const UserProfileSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  email: { type: String, required: true },
-  role: { type: String, default: 'Desenvolvedor' },
-  avatarColor: { type: String, default: '#6366f1' },
-  themeConfig: { type: Object, required: true },
-  createdAt: { type: String, required: true },
-  updatedAt: { type: String, required: true },
-});
-
-// Explicit Collection Names
-const JiraInstanceModel = mongoose.models.JiraInstance || mongoose.model('JiraInstance', JiraInstanceSchema, 'jira_instances');
-const TicketModel = mongoose.models.Ticket || mongoose.model('Ticket', TicketSchema, 'tickets');
-const ReminderModel = mongoose.models.Reminder || mongoose.model('Reminder', ReminderSchema, 'reminders');
-const NoteModel = mongoose.models.Note || mongoose.model('Note', NoteSchema, 'notes');
-const SavedJqlQueryModel = mongoose.models.SavedJqlQuery || mongoose.model('SavedJqlQuery', SavedJqlQuerySchema, 'saved_jql_queries');
-const UserProfileModel = mongoose.models.UserProfile || mongoose.model('UserProfile', UserProfileSchema, 'user_profiles');
-
-export async function initDatabase(): Promise<boolean> {
-  const storedUri = store.get('mongodb_uri') as string;
-  const urisToTry = storedUri
-    ? [storedUri, 'mongodb://127.0.0.1:27017/simplify_work', 'mongodb://localhost:27017/simplify_work']
-    : ['mongodb://127.0.0.1:27017/simplify_work', 'mongodb://localhost:27017/simplify_work'];
-
-  for (const uri of urisToTry) {
-    try {
-      await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 2000,
-        connectTimeoutMS: 2000,
-      });
-      isMongoConnected = true;
-      currentMongoUri = uri;
-      console.log(`[MongoDB] Conectado com sucesso em: ${uri}`);
-      return true;
-    } catch (e) {
-      // Tentar próximo URI
-    }
-  }
-
-  isMongoConnected = false;
-  console.warn('[MongoDB] Modo Local (electron-store) ativado - Banco MongoDB offline.');
-  return false;
-}
-
-export function getMongoStatus(): { connected: boolean; uri: string } {
-  return {
-    connected: isMongoConnected && mongoose.connection.readyState === 1,
-    uri: currentMongoUri,
-  };
-}
-
-export async function setMongoUri(newUri: string): Promise<{ success: boolean; message: string }> {
-  try {
-    if (mongoose.connection.readyState !== 0) {
-      await mongoose.disconnect();
-    }
-    await mongoose.connect(newUri, {
-      serverSelectionTimeoutMS: 3000,
-      connectTimeoutMS: 3000,
-    });
-    isMongoConnected = true;
-    currentMongoUri = newUri;
-    store.set('mongodb_uri', newUri);
-    return { success: true, message: `Conectado com sucesso ao MongoDB em: ${newUri}` };
-  } catch (err: any) {
-    isMongoConnected = false;
-    return { success: false, message: `Falha ao conectar: ${err.message}` };
-  }
-}
-
-// === JIRA INSTANCES DATABASE FUNCTIONS ===
-export async function dbGetJiraInstances(): Promise<JiraInstance[]> {
-  try {
-    if (isMongoConnected) {
-      const docs = await JiraInstanceModel.find().lean();
-      const list: JiraInstance[] = docs.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        domain: d.domain,
-        email: d.email,
-        apiToken: d.apiToken,
-        authType: d.authType || (d.cloudId ? 'OAUTH' : 'API_TOKEN'),
-        accessToken: d.accessToken || '',
-        refreshToken: d.refreshToken || '',
-        cloudId: d.cloudId || '',
-        avatarUrl: d.avatarUrl || '',
-      }));
-      if (list && list.length > 0) store.set('jira_instances_backup', list);
-      return list;
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetJiraInstances]:', err);
-  }
-  return (store.get('jira_instances_backup') as JiraInstance[]) || [];
-}
-
-export async function dbSaveJiraInstance(instance: Omit<JiraInstance, 'id'> & { id?: string }): Promise<JiraInstance> {
-  const id = instance.id || 'jira_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  const data = { id, ...instance };
-
-  try {
-    if (isMongoConnected) {
-      await JiraInstanceModel.findOneAndUpdate({ id }, data, { upsert: true, new: true });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveJiraInstance]:', err);
-  }
-
-  // Dual store backup
-  try {
-    const current = (store.get('jira_instances_backup') as JiraInstance[]) || [];
-    const exists = current.some((i) => i.id === id);
-    const updatedList = exists ? current.map((i) => (i.id === id ? data : i)) : [data, ...current];
-    store.set('jira_instances_backup', updatedList);
-  } catch (e) {}
-
-  return data;
-}
-
-export async function dbDeleteJiraInstance(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await JiraInstanceModel.deleteOne({ id });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteJiraInstance]:', err);
-  }
-
-  try {
-    const current = (store.get('jira_instances_backup') as JiraInstance[]) || [];
-    store.set('jira_instances_backup', current.filter((i) => i.id !== id));
-  } catch (e) {}
-
-  return true;
-}
-
-// === SAVED JQL QUERIES ===
-export async function dbGetSavedJqlQueries(): Promise<any[]> {
-  try {
-    if (isMongoConnected) {
-      const docs = await SavedJqlQueryModel.find().sort({ createdAt: -1 }).lean();
-      const list = docs.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        jql: d.jql,
-        jiraInstanceId: d.jiraInstanceId,
-        createdAt: d.createdAt,
-      }));
-      if (list && list.length > 0) store.set('saved_jql_queries_backup', list);
-      return list;
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetSavedJqlQueries]:', err);
-  }
-  return (store.get('saved_jql_queries_backup') as any[]) || [];
-}
-
-export async function dbSaveJqlQuery(query: { id?: string; name: string; jql: string; jiraInstanceId: string }): Promise<any> {
-  const id = query.id || 'jql_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  const data = {
-    id,
-    name: query.name,
-    jql: query.jql,
-    jiraInstanceId: query.jiraInstanceId,
-    createdAt: new Date().toISOString(),
-  };
-
-  try {
-    if (isMongoConnected) {
-      await SavedJqlQueryModel.findOneAndUpdate({ id }, data, { upsert: true, new: true });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveJqlQuery]:', err);
-  }
-
-  try {
-    const current = (store.get('saved_jql_queries_backup') as any[]) || [];
-    const exists = current.some((q) => q.id === id);
-    const updatedList = exists ? current.map((q) => (q.id === id ? data : q)) : [data, ...current];
-    store.set('saved_jql_queries_backup', updatedList);
-  } catch (e) {}
-
-  return data;
-}
-
-export async function dbDeleteJqlQuery(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await SavedJqlQueryModel.deleteOne({ id });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteJqlQuery]:', err);
-  }
-
-  try {
-    const current = (store.get('saved_jql_queries_backup') as any[]) || [];
-    store.set('saved_jql_queries_backup', current.filter((q) => q.id !== id));
-  } catch (e) {}
-
-  return true;
-}
-
-// === TICKETS ===
-export async function dbGetTickets(): Promise<Ticket[]> {
-  try {
-    if (isMongoConnected) {
-      const docs = await TicketModel.find().sort({ createdAt: -1 }).lean();
-
-      // Find highest existing numerical key for local tickets
-      let highestKeyNum = 0;
-      docs.forEach((d: any) => {
-        if (d.source === 'LOCAL' && d.key) {
-          const match = String(d.key).match(/^TASK-(\d+)$/i);
-          if (match && match[1]) {
-            const n = parseInt(match[1], 10);
-            if (!isNaN(n) && n > highestKeyNum) highestKeyNum = n;
-          }
-        }
-      });
-
-      // Backfill missing keys for local tickets chronologically
-      const sortedLocalDocs = docs
-        .filter((d: any) => d.source === 'LOCAL' && !d.key)
-        .sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-
-      const assignedKeysMap = new Map<string, string>();
-      sortedLocalDocs.forEach((d: any) => {
-        highestKeyNum++;
-        const newKey = `TASK-${highestKeyNum}`;
-        assignedKeysMap.set(d.id, newKey);
-        TicketModel.updateOne({ id: d.id }, { key: newKey }).exec().catch(() => {});
-      });
-
-      const list: Ticket[] = docs.map((d: any) => {
-        let key = d.key || '';
-        if (d.source === 'LOCAL' && !key) {
-          key = assignedKeysMap.get(d.id) || 'TASK-1';
-        }
-
-        return {
-          id: d.id,
-          key,
-          source: d.source,
-          title: d.title,
-          description: d.description,
-          status: d.status,
-          statusLabel: d.statusLabel,
-          color: d.color,
-          labels: d.labels || [],
-          comments: d.comments || [],
-          priority: d.priority,
-          assignee: d.assignee,
-          reporter: d.reporter,
-          startDate: d.startDate,
-          dueDate: d.dueDate,
-          jiraInstanceId: d.jiraInstanceId,
-          linkedTicketIds: d.linkedTicketIds || [],
-          linkedNoteIds: d.linkedNoteIds || [],
-          updatedAt: d.updatedAt,
-          createdAt: d.createdAt,
-        };
-      });
-
-      if (list && list.length > 0) store.set('tickets_backup', list);
-      return list;
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetTickets]:', err);
-  }
-
-  const backupList = (store.get('tickets_backup') as Ticket[]) || [];
-  let maxBackupNum = 0;
-  backupList.forEach((t) => {
-    if (t.source === 'LOCAL' && t.key) {
-      const match = String(t.key).match(/^TASK-(\d+)$/i);
-      if (match && match[1]) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > maxBackupNum) maxBackupNum = n;
-      }
-    }
-  });
-
-  return backupList.map((t) => {
-    if (t.source === 'LOCAL' && !t.key) {
-      maxBackupNum++;
-      return { ...t, key: `TASK-${maxBackupNum}` };
-    }
-    return t;
-  });
-}
-
-export async function dbSaveTicket(ticket: Partial<Ticket>): Promise<Ticket> {
-  const id = ticket.id || 'tck_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  const now = new Date().toISOString();
-
-  // Auto-generate TASK-N key for LOCAL tickets if key is missing
-  let generatedKey = ticket.key || '';
-  if (ticket.source === 'LOCAL' && !generatedKey) {
-    try {
-      let localTickets: Ticket[] = [];
-      if (isMongoConnected) {
-        const docs = await TicketModel.find({ source: 'LOCAL' }).lean();
-        localTickets = docs as any[];
-      }
-      if (localTickets.length === 0) {
-        const backup = (store.get('tickets_backup') as Ticket[]) || [];
-        localTickets = backup.filter((t) => t.source === 'LOCAL');
-      }
-
-      let maxNum = 0;
-      localTickets.forEach((t) => {
-        if (t.key) {
-          const match = String(t.key).match(/^TASK-(\d+)$/i);
-          if (match && match[1]) {
-            const num = parseInt(match[1], 10);
-            if (!isNaN(num) && num > maxNum) {
-              maxNum = num;
-            }
-          }
-        }
-      });
-      generatedKey = `TASK-${maxNum + 1}`;
-    } catch (e) {
-      generatedKey = 'TASK-1';
-    }
-  }
-
-  // Preserve existing linkedTicketIds and linkedNoteIds if not explicitly provided in partial update
-  let existingLinkedIds: string[] = [];
-  let existingLinkedNoteIds: string[] = [];
-  try {
-    if (isMongoConnected) {
-      const existingDoc = await TicketModel.findOne({ id }).lean();
-      if (existingDoc) {
-        if (Array.isArray((existingDoc as any).linkedTicketIds)) {
-          existingLinkedIds = (existingDoc as any).linkedTicketIds;
-        }
-        if (Array.isArray((existingDoc as any).linkedNoteIds)) {
-          existingLinkedNoteIds = (existingDoc as any).linkedNoteIds;
-        }
-      }
-    }
-  } catch (e) {}
-
-  if (existingLinkedIds.length === 0 || existingLinkedNoteIds.length === 0) {
-    try {
-      const currentBackup = (store.get('tickets_backup') as Ticket[]) || [];
-      const foundBackup = currentBackup.find((t) => t.id === id);
-      if (foundBackup) {
-        if (existingLinkedIds.length === 0 && Array.isArray(foundBackup.linkedTicketIds)) {
-          existingLinkedIds = foundBackup.linkedTicketIds;
-        }
-        if (existingLinkedNoteIds.length === 0 && Array.isArray(foundBackup.linkedNoteIds)) {
-          existingLinkedNoteIds = foundBackup.linkedNoteIds;
-        }
-      }
-    } catch (e) {}
-  }
-
-  const finalLinkedIds = ticket.linkedTicketIds !== undefined
-    ? ticket.linkedTicketIds
-    : existingLinkedIds;
-
-  const finalLinkedNoteIds = ticket.linkedNoteIds !== undefined
-    ? ticket.linkedNoteIds
-    : existingLinkedNoteIds;
-
-  const sanitizedComments = (ticket.comments || []).map((c: any) => ({
-    id: String(c.id || 'comm_' + Date.now()),
-    author: String(c.author || 'Eu'),
-    body: String(c.body || ''),
-    created: String(c.created || now),
-    isLocal: c.isLocal !== undefined ? Boolean(c.isLocal) : String(c.id || '').startsWith('comm_'),
-  }));
-
-  const data: Ticket = {
-    id,
-    key: generatedKey,
-    source: ticket.source || 'LOCAL',
-    title: ticket.title || 'Sem Título',
-    description: ticket.description || '',
-    status: ticket.status || 'TO_DO',
-    statusLabel: ticket.statusLabel || ticket.status || 'A Fazer',
-    color: ticket.color || '#3b82f6',
-    labels: ticket.labels || [],
-    comments: sanitizedComments,
-    priority: ticket.priority || 'Normal',
-    assignee: ticket.assignee || 'Eu',
-    reporter: ticket.reporter || 'Eu',
-    startDate: ticket.startDate || '',
-    dueDate: ticket.dueDate || '',
-    jiraInstanceId: ticket.jiraInstanceId || '',
-    linkedTicketIds: finalLinkedIds,
-    linkedNoteIds: finalLinkedNoteIds,
-    updatedAt: now,
-    createdAt: ticket.createdAt || now,
-  };
-
-  try {
-    if (isMongoConnected) {
-      await TicketModel.findOneAndUpdate({ id }, data, { upsert: true, returnDocument: 'after' });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveTicket]:', err);
-  }
-
-  try {
-    const current = (store.get('tickets_backup') as Ticket[]) || [];
-    const exists = current.some((t) => t.id === id);
-    const updatedList = exists ? current.map((t) => (t.id === id ? data : t)) : [data, ...current];
-    store.set('tickets_backup', updatedList);
-  } catch (e) {}
-
-  return data;
-}
-
-export async function dbDeleteTicket(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await TicketModel.deleteOne({ id });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteTicket]:', err);
-  }
-
-  try {
-    const current = (store.get('tickets_backup') as Ticket[]) || [];
-    store.set('tickets_backup', current.filter((t) => t.id !== id));
-  } catch (e) {}
-
-  return true;
-}
-
-// === REMINDERS ===
-export async function dbGetReminders(): Promise<Reminder[]> {
-  try {
-    if (isMongoConnected) {
-      const docs = await ReminderModel.find().sort({ createdAt: -1 }).lean();
-      const list: Reminder[] = docs.map((d: any) => ({
-        id: d.id,
-        eventId: d.eventId || '',
-        title: d.title,
-        message: d.message,
-        recurrence: d.recurrence,
-        intervalMinutes: d.intervalMinutes,
-        scheduledTime: d.scheduledTime,
-        enabled: Boolean(d.enabled),
-        lastTriggered: d.lastTriggered,
-        createdAt: d.createdAt,
-      }));
-      if (list && list.length > 0) store.set('reminders_backup', list);
-      return list;
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetReminders]:', err);
-  }
-  return (store.get('reminders_backup') as Reminder[]) || [];
-}
-
-export async function dbSaveReminder(reminder: Partial<Reminder>): Promise<Reminder> {
-  const id = reminder.id || 'rem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  const now = new Date().toISOString();
-  const initialLastTriggered = reminder.lastTriggered !== undefined ? reminder.lastTriggered : '';
-
-  const data: Reminder = {
-    id,
-    eventId: reminder.eventId !== undefined ? reminder.eventId : '',
-    title: reminder.title || 'Novo Lembrete',
-    message: reminder.message || '',
-    recurrence: reminder.recurrence || 'INTERVAL',
-    intervalMinutes: reminder.intervalMinutes !== undefined ? Number(reminder.intervalMinutes) : 60,
-    scheduledTime: reminder.scheduledTime !== undefined ? reminder.scheduledTime : '',
-    enabled: reminder.enabled !== undefined ? Boolean(reminder.enabled) : true,
-    lastTriggered: initialLastTriggered,
-    createdAt: reminder.createdAt || now,
-  };
-
-  try {
-    if (isMongoConnected) {
-      await ReminderModel.findOneAndUpdate({ id }, data, { upsert: true, new: true });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveReminder]:', err);
-  }
-
-  try {
-    const current = (store.get('reminders_backup') as Reminder[]) || [];
-    const exists = current.some((r) => r.id === id);
-    const updatedList = exists ? current.map((r) => (r.id === id ? data : r)) : [data, ...current];
-    store.set('reminders_backup', updatedList);
-  } catch (e) {}
-
-  return data;
-}
-
-export async function dbDeleteReminder(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await ReminderModel.deleteOne({ id });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteReminder]:', err);
-  }
-
-  try {
-    const current = (store.get('reminders_backup') as Reminder[]) || [];
-    store.set('reminders_backup', current.filter((r) => r.id !== id));
-  } catch (e) {}
-
-  return true;
-}
-
-// === NOTES ===
-export async function dbGetNotes(): Promise<NoteItem[]> {
-  try {
-    if (isMongoConnected) {
-      const docs = await NoteModel.find().sort({ updatedAt: -1 }).lean();
-      const rawList: NoteItem[] = docs.map((d: any) => {
-        const ext = ((d.filePath || d.title || '').split('.').pop() || '').toLowerCase();
-        const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
-        return {
-          id: d.id,
-          title: d.title,
-          filePath: d.filePath,
-          updatedAt: d.updatedAt,
-          format: d.format || (isBinaryFile ? 'file' : 'richtext'),
-          fileType: d.fileType,
-          originalFileName: d.originalFileName,
-          fileSize: d.fileSize,
-          mimeType: d.mimeType,
-        };
-      });
-
-      // Deduplicate by filePath so each physical file appears exactly once
-      const uniqueMap = new Map<string, NoteItem>();
-      rawList.forEach((item) => {
-        if (!uniqueMap.has(item.filePath)) {
-          uniqueMap.set(item.filePath, item);
-        }
-      });
-      const list = Array.from(uniqueMap.values());
-
-      if (list && list.length > 0) store.set('notes_backup', list);
-      return list;
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetNotes]:', err);
-  }
-
-  const backup = (store.get('notes_backup') as NoteItem[]) || [];
-  const uniqueMap = new Map<string, NoteItem>();
-  backup.forEach((item) => {
-    const ext = ((item.filePath || item.title || '').split('.').pop() || '').toLowerCase();
-    const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
-    const normalizedItem: NoteItem = {
-      ...item,
-      format: item.format || (isBinaryFile ? 'file' : 'richtext'),
-    };
-    if (!uniqueMap.has(normalizedItem.filePath)) {
-      uniqueMap.set(normalizedItem.filePath, normalizedItem);
-    }
-  });
-  return Array.from(uniqueMap.values());
-}
-
-export async function dbSaveNoteMeta(note: Partial<NoteItem>): Promise<NoteItem> {
-  let id = note.id;
-  let existing: NoteItem | null = null;
-
-  if (note.filePath) {
-    const backup = (store.get('notes_backup') as NoteItem[]) || [];
-    existing = backup.find((n) => n.filePath === note.filePath || (id && n.id === id)) || null;
-    if (!id && existing) id = existing.id;
-  }
-
-  if (!id) {
-    id = 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  }
-
-  const ext = ((note.filePath || existing?.filePath || note.title || '').split('.').pop() || '').toLowerCase();
-  const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
-
-  const now = new Date().toISOString();
-  const data: NoteItem = {
-    id,
-    title: note.title || existing?.title || 'Nova Anotação',
-    filePath: note.filePath || existing?.filePath || '',
-    updatedAt: now,
-    format: note.format || existing?.format || (isBinaryFile ? 'file' : 'richtext'),
-    fileType: note.fileType || existing?.fileType,
-    originalFileName: note.originalFileName || existing?.originalFileName,
-    fileSize: note.fileSize || existing?.fileSize,
-    mimeType: note.mimeType || existing?.mimeType,
-  };
-
-  try {
-    if (isMongoConnected) {
-      await NoteModel.findOneAndUpdate({ filePath: data.filePath }, data, { upsert: true, new: true });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveNoteMeta]:', err);
-  }
-
-  try {
-    const current = (store.get('notes_backup') as NoteItem[]) || [];
-    const exists = current.some((n) => n.filePath === data.filePath || n.id === id);
-    const updatedList = exists
-      ? current.map((n) => (n.filePath === data.filePath || n.id === id ? data : n))
-      : [data, ...current];
-    const uniqueMap = new Map<string, NoteItem>();
-    updatedList.forEach((item) => {
-      if (!uniqueMap.has(item.filePath)) {
-        uniqueMap.set(item.filePath, item);
-      }
-    });
-    store.set('notes_backup', Array.from(uniqueMap.values()));
-  } catch (e) {}
-
-  return data;
-}
-
-export async function dbDeleteNoteMeta(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await NoteModel.deleteOne({ id });
-    }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteNoteMeta]:', err);
-  }
-
-  try {
-    const current = (store.get('notes_backup') as NoteItem[]) || [];
-    store.set('notes_backup', current.filter((n) => n.id !== id));
-  } catch (e) {}
-
-  return true;
-}
-
-// === USER PROFILES DATABASE FUNCTIONS ===
 const defaultUserProfile: UserProfile = {
   id: 'user_default_main',
   name: 'Meu Perfil',
@@ -748,44 +30,1261 @@ const defaultUserProfile: UserProfile = {
   updatedAt: new Date().toISOString(),
 };
 
-export async function dbGetUsers(): Promise<UserProfile[]> {
+export function getDatabasePath(): string {
+  if (dbFilePath) return dbFilePath;
   try {
-    if (isMongoConnected) {
-      const list = await UserProfileModel.find().lean();
-      if (list && list.length > 0) {
-        const cleanList = list.map((u: any) => {
-          const { _id, __v, ...rest } = u;
-          return rest as UserProfile;
+    const userDataPath = app.getPath('userData');
+    if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+    }
+    dbFilePath = path.join(userDataPath, 'simplify_work.sqlite');
+    return dbFilePath;
+  } catch (e) {
+    dbFilePath = path.resolve('simplify_work.sqlite');
+    return dbFilePath;
+  }
+}
+
+export async function initDatabase(): Promise<boolean> {
+  try {
+    const filePath = getDatabasePath();
+    console.log(`[SQLite] Inicializando banco de dados em: ${filePath}`);
+
+    db = new Database(filePath, { verbose: undefined });
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('foreign_keys = ON');
+
+    createTables();
+    migrateLegacyStoreData();
+
+    console.log('[SQLite] Banco de dados inicializado com sucesso.');
+    return true;
+  } catch (err) {
+    console.error('[SQLite Init Error]:', err);
+    return false;
+  }
+}
+
+function createTables() {
+  if (!db) return;
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jira_instances (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      email TEXT NOT NULL,
+      apiToken TEXT NOT NULL,
+      authType TEXT DEFAULT 'API_TOKEN',
+      accessToken TEXT DEFAULT '',
+      refreshToken TEXT DEFAULT '',
+      cloudId TEXT DEFAULT '',
+      avatarUrl TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS saved_jql_queries (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      jql TEXT NOT NULL,
+      jiraInstanceId TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tickets (
+      id TEXT PRIMARY KEY,
+      key TEXT DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'LOCAL',
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'TO_DO',
+      statusLabel TEXT DEFAULT 'A Fazer',
+      jiraStatus TEXT DEFAULT '',
+      color TEXT DEFAULT '#3b82f6',
+      labels TEXT DEFAULT '[]',
+      comments TEXT DEFAULT '[]',
+      priority TEXT DEFAULT 'Normal',
+      assignee TEXT DEFAULT 'Eu',
+      reporter TEXT DEFAULT 'Eu',
+      startDate TEXT DEFAULT '',
+      dueDate TEXT DEFAULT '',
+      jiraInstanceId TEXT DEFAULT '',
+      linkedTicketIds TEXT DEFAULT '[]',
+      linkedNoteIds TEXT DEFAULT '[]',
+      updatedAt TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tickets_key ON tickets(key);
+    CREATE INDEX IF NOT EXISTS idx_tickets_source ON tickets(source);
+    CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+
+    CREATE TABLE IF NOT EXISTS reminders (
+      id TEXT PRIMARY KEY,
+      eventId TEXT DEFAULT '',
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      recurrence TEXT NOT NULL DEFAULT 'INTERVAL',
+      intervalMinutes INTEGER DEFAULT 45,
+      scheduledTime TEXT DEFAULT '',
+      enabled INTEGER DEFAULT 1,
+      lastTriggered TEXT DEFAULT '',
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      filePath TEXT NOT NULL UNIQUE,
+      updatedAt TEXT NOT NULL,
+      format TEXT DEFAULT 'richtext',
+      fileType TEXT,
+      originalFileName TEXT,
+      fileSize INTEGER,
+      mimeType TEXT,
+      folderId TEXT DEFAULT '',
+      isArchived INTEGER DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notes_filepath ON notes(filePath);
+
+    CREATE TABLE IF NOT EXISTS note_folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT DEFAULT '#6366f1',
+      parentId TEXT DEFAULT '',
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT DEFAULT 'Desenvolvedor',
+      avatarColor TEXT DEFAULT '#6366f1',
+      themeConfig TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS client_assets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      color TEXT DEFAULT '#6366f1',
+      icon TEXT DEFAULT 'building',
+      instanceIds TEXT DEFAULT '[]',
+      linkedTicketIds TEXT DEFAULT '[]',
+      linkedNoteIds TEXT DEFAULT '[]',
+      linkedFolderIds TEXT DEFAULT '[]',
+      linkedEventIds TEXT DEFAULT '[]',
+      linkedReminderIds TEXT DEFAULT '[]',
+      contactEmail TEXT DEFAULT '',
+      contactPhone TEXT DEFAULT '',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_client_assets_name ON client_assets(name);
+    CREATE INDEX IF NOT EXISTS idx_client_assets_status ON client_assets(status);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+
+  try {
+    db.exec("ALTER TABLE tickets ADD COLUMN jiraStatus TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE tickets ADD COLUMN clientId TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE notes ADD COLUMN folderId TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE notes ADD COLUMN clientId TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE notes ADD COLUMN isArchived INTEGER DEFAULT 0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE note_folders ADD COLUMN parentId TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE note_folders ADD COLUMN clientId TEXT DEFAULT ''");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE note_folders ADD COLUMN isArchived INTEGER DEFAULT 0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE reminders ADD COLUMN clientId TEXT DEFAULT ''");
+  } catch (e) {}
+}
+
+function migrateLegacyStoreData() {
+  if (!db) return;
+
+  try {
+    // 1. Migrate Users
+    const userCount = (db.prepare('SELECT count(*) as count FROM user_profiles').get() as any)?.count || 0;
+    if (userCount === 0) {
+      const legacyUsers = (store.get('user_profiles_backup') as UserProfile[]) || [];
+      const usersToInsert = legacyUsers.length > 0 ? legacyUsers : [defaultUserProfile];
+      
+      const insertUser = db.prepare(`
+        INSERT OR REPLACE INTO user_profiles (id, name, email, role, avatarColor, themeConfig, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const tx = db.transaction((users: UserProfile[]) => {
+        for (const u of users) {
+          insertUser.run(
+            u.id || `user_${Date.now()}`,
+            u.name || 'Meu Perfil',
+            u.email || 'usuario@empresa.com',
+            u.role || 'Desenvolvedor',
+            u.avatarColor || '#6366f1',
+            JSON.stringify(u.themeConfig || defaultUserProfile.themeConfig),
+            u.createdAt || new Date().toISOString(),
+            u.updatedAt || new Date().toISOString()
+          );
+        }
+      });
+      tx(usersToInsert);
+    }
+
+    // 2. Migrate Jira Instances
+    const jiraCount = (db.prepare('SELECT count(*) as count FROM jira_instances').get() as any)?.count || 0;
+    if (jiraCount === 0) {
+      const legacyJira = (store.get('jira_instances_backup') as JiraInstance[]) || [];
+      if (legacyJira.length > 0) {
+        const insertJira = db.prepare(`
+          INSERT OR REPLACE INTO jira_instances (id, name, domain, email, apiToken, authType, accessToken, refreshToken, cloudId, avatarUrl)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const tx = db.transaction((list: JiraInstance[]) => {
+          for (const j of list) {
+            insertJira.run(
+              j.id,
+              j.name,
+              j.domain,
+              j.email,
+              j.apiToken,
+              j.authType || 'API_TOKEN',
+              j.accessToken || '',
+              j.refreshToken || '',
+              j.cloudId || '',
+              j.avatarUrl || ''
+            );
+          }
         });
-        store.set('user_profiles_backup', cleanList);
-        return cleanList;
+        tx(legacyJira);
       }
     }
-  } catch (err) {
-    console.error('[MongoDB Error dbGetUsers]:', err);
+
+    // 3. Migrate Saved JQL
+    const jqlCount = (db.prepare('SELECT count(*) as count FROM saved_jql_queries').get() as any)?.count || 0;
+    if (jqlCount === 0) {
+      const legacyJql = (store.get('saved_jql_queries_backup') as any[]) || [];
+      if (legacyJql.length > 0) {
+        const insertJql = db.prepare(`
+          INSERT OR REPLACE INTO saved_jql_queries (id, name, jql, jiraInstanceId, createdAt)
+          VALUES (?, ?, ?, ?, ?)
+        `);
+        const tx = db.transaction((list: any[]) => {
+          for (const q of list) {
+            insertJql.run(q.id, q.name, q.jql, q.jiraInstanceId, q.createdAt || new Date().toISOString());
+          }
+        });
+        tx(legacyJql);
+      }
+    }
+
+    // 4. Migrate Tickets
+    const ticketCount = (db.prepare('SELECT count(*) as count FROM tickets').get() as any)?.count || 0;
+    if (ticketCount === 0) {
+      const legacyTickets = (store.get('tickets_backup') as Ticket[]) || [];
+      if (legacyTickets.length > 0) {
+        const insertTicket = db.prepare(`
+          INSERT OR REPLACE INTO tickets (
+            id, key, source, title, description, status, statusLabel, color, labels, comments,
+            priority, assignee, reporter, startDate, dueDate, jiraInstanceId, linkedTicketIds,
+            linkedNoteIds, updatedAt, createdAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const tx = db.transaction((list: Ticket[]) => {
+          for (const t of list) {
+            insertTicket.run(
+              t.id,
+              t.key || '',
+              t.source || 'LOCAL',
+              t.title || 'Sem Título',
+              t.description || '',
+              t.status || 'TO_DO',
+              t.statusLabel || 'A Fazer',
+              t.color || '#3b82f6',
+              JSON.stringify(t.labels || []),
+              JSON.stringify(t.comments || []),
+              t.priority || 'Normal',
+              t.assignee || 'Eu',
+              t.reporter || 'Eu',
+              t.startDate || '',
+              t.dueDate || '',
+              t.jiraInstanceId || '',
+              JSON.stringify(t.linkedTicketIds || []),
+              JSON.stringify(t.linkedNoteIds || []),
+              t.updatedAt || new Date().toISOString(),
+              t.createdAt || new Date().toISOString()
+            );
+          }
+        });
+        tx(legacyTickets);
+      }
+    }
+
+    // 5. Migrate Reminders
+    const reminderCount = (db.prepare('SELECT count(*) as count FROM reminders').get() as any)?.count || 0;
+    if (reminderCount === 0) {
+      const legacyReminders = (store.get('reminders_backup') as Reminder[]) || [];
+      if (legacyReminders.length > 0) {
+        const insertReminder = db.prepare(`
+          INSERT OR REPLACE INTO reminders (id, eventId, title, message, recurrence, intervalMinutes, scheduledTime, enabled, lastTriggered, createdAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const tx = db.transaction((list: Reminder[]) => {
+          for (const r of list) {
+            insertReminder.run(
+              r.id,
+              r.eventId || '',
+              r.title || 'Lembrete',
+              r.message || '',
+              r.recurrence || 'INTERVAL',
+              r.intervalMinutes || 45,
+              r.scheduledTime || '',
+              r.enabled ? 1 : 0,
+              r.lastTriggered || '',
+              r.createdAt || new Date().toISOString()
+            );
+          }
+        });
+        tx(legacyReminders);
+      }
+    }
+
+    // 6. Migrate Notes
+    const noteCount = (db.prepare('SELECT count(*) as count FROM notes').get() as any)?.count || 0;
+    if (noteCount === 0) {
+      const legacyNotes = (store.get('notes_backup') as NoteItem[]) || [];
+      if (legacyNotes.length > 0) {
+        const insertNote = db.prepare(`
+          INSERT OR REPLACE INTO notes (id, title, filePath, updatedAt, format, fileType, originalFileName, fileSize, mimeType)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const tx = db.transaction((list: NoteItem[]) => {
+          for (const n of list) {
+            insertNote.run(
+              n.id,
+              n.title || 'Nota',
+              n.filePath,
+              n.updatedAt || new Date().toISOString(),
+              n.format || 'richtext',
+              n.fileType || null,
+              n.originalFileName || null,
+              n.fileSize || null,
+              n.mimeType || null
+            );
+          }
+        });
+        tx(legacyNotes);
+      }
+    }
+  } catch (e) {
+    console.error('[SQLite Migration Error]:', e);
+  }
+}
+
+function getDirectorySize(dirPath: string): number {
+  let total = 0;
+  try {
+    if (!fs.existsSync(dirPath)) return 0;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          total += getDirectorySize(fullPath);
+        } else if (entry.isFile()) {
+          const stat = fs.statSync(fullPath);
+          total += stat.size;
+        }
+      } catch {}
+    }
+  } catch {}
+  return total;
+}
+
+// === DATABASE STATS & UTILS ===
+export function getDatabaseStats() {
+  if (!db) return null;
+  const filePath = getDatabasePath();
+  const userDataPath = path.dirname(filePath);
+  
+  let totalBytes = 0;
+  try {
+    // 1. Tamanho do banco SQLite e arquivos de journaling WAL/SHM
+    if (fs.existsSync(filePath)) {
+      totalBytes += fs.statSync(filePath).size;
+    }
+    if (fs.existsSync(`${filePath}-wal`)) {
+      totalBytes += fs.statSync(`${filePath}-wal`).size;
+    }
+    if (fs.existsSync(`${filePath}-shm`)) {
+      totalBytes += fs.statSync(`${filePath}-shm`).size;
+    }
+
+    // 2. Tamanho de todas as notas físicas, documentos anexados e imagens
+    const notesDir = path.join(userDataPath, 'notes');
+    if (fs.existsSync(notesDir)) {
+      totalBytes += getDirectorySize(notesDir);
+    }
+
+    // 3. Tamanho de backups locais ou outros arquivos de armazenamento
+    const backupsDir = path.join(userDataPath, 'backups');
+    if (fs.existsSync(backupsDir)) {
+      totalBytes += getDirectorySize(backupsDir);
+    }
+  } catch (e) {
+    console.error('Erro ao calcular tamanho total em disco:', e);
   }
 
-  const backup = (store.get('user_profiles_backup') as UserProfile[]) || [];
-  if (backup.length === 0) {
-    store.set('user_profiles_backup', [defaultUserProfile]);
-    if (isMongoConnected) {
-      try {
-        await UserProfileModel.create(defaultUserProfile);
-      } catch (e) {}
+  let fileSizeFormatted = '0 B';
+  if (totalBytes > 1024 * 1024 * 1024) {
+    fileSizeFormatted = `${(totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  } else if (totalBytes > 1024 * 1024) {
+    fileSizeFormatted = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+  } else if (totalBytes > 1024) {
+    fileSizeFormatted = `${(totalBytes / 1024).toFixed(1)} KB`;
+  } else {
+    fileSizeFormatted = `${totalBytes} B`;
+  }
+
+  const ticketsCount = (db.prepare('SELECT count(*) as count FROM tickets').get() as any)?.count || 0;
+  const notesCount = (db.prepare('SELECT count(*) as count FROM notes').get() as any)?.count || 0;
+  const remindersCount = (db.prepare('SELECT count(*) as count FROM reminders').get() as any)?.count || 0;
+  const jiraCount = (db.prepare('SELECT count(*) as count FROM jira_instances').get() as any)?.count || 0;
+  const jqlCount = (db.prepare('SELECT count(*) as count FROM saved_jql_queries').get() as any)?.count || 0;
+  const usersCount = (db.prepare('SELECT count(*) as count FROM user_profiles').get() as any)?.count || 0;
+
+  return {
+    engine: 'SQLite (better-sqlite3)',
+    filePath,
+    fileSize: fileSizeFormatted,
+    isHealthy: true,
+    tableCounts: {
+      tickets: ticketsCount,
+      notes: notesCount,
+      reminders: remindersCount,
+      jiraInstances: jiraCount,
+      savedJqlQueries: jqlCount,
+      users: usersCount,
+    },
+  };
+}
+
+// Backward compatibility helper for legacy Mongo status checks
+export function getMongoStatus() {
+  const stats = getDatabaseStats();
+  return {
+    connected: true,
+    engine: 'SQLITE',
+    uri: stats?.filePath || getDatabasePath(),
+  };
+}
+
+export async function setMongoUri(_uri: string) {
+  return { success: true, message: 'Operando 100% via SQLite local embutido.' };
+}
+
+// === SETTINGS KEY-VALUE STORE ===
+export function dbGetSetting(key: string): string | null {
+  if (!db) return (store.get(key) as string) || null;
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as any;
+  if (row) return row.value;
+  return (store.get(key) as string) || null;
+}
+
+export function dbSetSetting(key: string, value: string): void {
+  if (db) {
+    db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)').run(key, value);
+  }
+  store.set(key, value);
+}
+
+// === JIRA INSTANCES ===
+export async function dbGetJiraInstances(): Promise<JiraInstance[]> {
+  if (!db) return (store.get('jira_instances_backup') as JiraInstance[]) || [];
+  try {
+    const rows = db.prepare('SELECT * FROM jira_instances').all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      domain: r.domain,
+      email: r.email,
+      apiToken: r.apiToken,
+      authType: r.authType || (r.cloudId ? 'OAUTH' : 'API_TOKEN'),
+      accessToken: r.accessToken || '',
+      refreshToken: r.refreshToken || '',
+      cloudId: r.cloudId || '',
+      avatarUrl: r.avatarUrl || '',
+    }));
+  } catch (err) {
+    console.error('[SQLite Error dbGetJiraInstances]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveJiraInstance(instance: Omit<JiraInstance, 'id'> & { id?: string }): Promise<JiraInstance> {
+  const id = instance.id || 'jira_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const data: JiraInstance = {
+    id,
+    name: instance.name,
+    domain: instance.domain,
+    email: instance.email,
+    apiToken: instance.apiToken,
+    authType: instance.authType || 'API_TOKEN',
+    accessToken: instance.accessToken || '',
+    refreshToken: instance.refreshToken || '',
+    cloudId: instance.cloudId || '',
+    avatarUrl: instance.avatarUrl || '',
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO jira_instances (id, name, domain, email, apiToken, authType, accessToken, refreshToken, cloudId, avatarUrl)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.name,
+        data.domain,
+        data.email,
+        data.apiToken,
+        data.authType,
+        data.accessToken,
+        data.refreshToken,
+        data.cloudId,
+        data.avatarUrl
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveJiraInstance]:', err);
     }
+  }
+
+  return data;
+}
+
+export async function dbDeleteJiraInstance(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      // 1. Delete all tickets belonging to this Jira instance
+      db.prepare(`
+        DELETE FROM tickets 
+        WHERE source = 'JIRA' 
+          AND (jiraInstanceId = ? OR jiraInstanceId = '' OR jiraInstanceId IS NULL OR id LIKE ? OR id LIKE ?)
+      `).run(id, `jira_%_${id}`, `%_${id}`);
+
+      // 2. Delete saved JQL queries belonging to this Jira instance
+      db.prepare('DELETE FROM saved_jql_queries WHERE jiraInstanceId = ?').run(id);
+
+      // 3. Clean up references in client_assets
+      const assets = db.prepare('SELECT id, instanceIds FROM client_assets').all() as any[];
+      for (const asset of assets) {
+        let instanceIds: string[] = [];
+        try { instanceIds = JSON.parse(asset.instanceIds || '[]'); } catch (e) {}
+
+        const newInstanceIds = instanceIds.filter((instId) => instId !== id);
+        if (newInstanceIds.length !== instanceIds.length) {
+          db.prepare('UPDATE client_assets SET instanceIds = ?, updatedAt = ? WHERE id = ?').run(
+            JSON.stringify(newInstanceIds),
+            new Date().toISOString(),
+            asset.id
+          );
+        }
+      }
+
+      // 4. Delete the Jira instance itself
+      db.prepare('DELETE FROM jira_instances WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteJiraInstance]:', err);
+    }
+  }
+  return true;
+}
+
+// === SAVED JQL QUERIES ===
+export async function dbGetSavedJqlQueries(): Promise<any[]> {
+  if (!db) return (store.get('saved_jql_queries_backup') as any[]) || [];
+  try {
+    const rows = db.prepare('SELECT * FROM saved_jql_queries ORDER BY createdAt DESC').all() as any[];
+    return rows;
+  } catch (err) {
+    console.error('[SQLite Error dbGetSavedJqlQueries]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveJqlQuery(query: { id?: string; name: string; jql: string; jiraInstanceId: string }): Promise<any> {
+  const id = query.id || 'jql_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const data = {
+    id,
+    name: query.name,
+    jql: query.jql,
+    jiraInstanceId: query.jiraInstanceId,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO saved_jql_queries (id, name, jql, jiraInstanceId, createdAt)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(data.id, data.name, data.jql, data.jiraInstanceId, data.createdAt);
+    } catch (err) {
+      console.error('[SQLite Error dbSaveJqlQuery]:', err);
+    }
+  }
+
+  return data;
+}
+
+export async function dbDeleteJqlQuery(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      db.prepare('DELETE FROM saved_jql_queries WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteJqlQuery]:', err);
+    }
+  }
+  return true;
+}
+
+// === TICKETS ===
+export async function dbGetTickets(): Promise<Ticket[]> {
+  if (!db) return (store.get('tickets_backup') as Ticket[]) || [];
+
+  try {
+    const rows = db.prepare('SELECT * FROM tickets ORDER BY createdAt DESC').all() as any[];
+
+    // Check highest existing numerical key for local tickets
+    let highestKeyNum = 0;
+    rows.forEach((r) => {
+      if (r.source === 'LOCAL' && r.key) {
+        const match = String(r.key).match(/^TASK-(\d+)$/i);
+        if (match && match[1]) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > highestKeyNum) highestKeyNum = n;
+        }
+      }
+    });
+
+    // Backfill missing keys for local tickets chronologically
+    const updateKeyStmt = db.prepare('UPDATE tickets SET key = ? WHERE id = ?');
+    const sortedLocalRows = rows
+      .filter((r) => r.source === 'LOCAL' && !r.key)
+      .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+    sortedLocalRows.forEach((r) => {
+      highestKeyNum++;
+      const newKey = `TASK-${highestKeyNum}`;
+      r.key = newKey;
+      try {
+        updateKeyStmt.run(newKey, r.id);
+      } catch (e) {}
+    });
+
+    // Ensure non-local (JIRA) tickets always have a valid instance assigned, and clean up orphaned Jira tickets
+    const currentInstances = db.prepare('SELECT id, domain FROM jira_instances').all() as any[];
+    const validInstanceIds = new Set(currentInstances.map((i) => i.id));
+    const updateInstStmt = db.prepare('UPDATE tickets SET jiraInstanceId = ? WHERE id = ?');
+    const deleteOrphanedStmt = db.prepare("DELETE FROM tickets WHERE id = ? AND source = 'JIRA'");
+
+    const filteredRows: any[] = [];
+
+    for (const r of rows) {
+      if (r.source === 'JIRA') {
+        if (currentInstances.length === 0) {
+          // No Jira instances exist in the app - delete orphaned Jira ticket
+          try { deleteOrphanedStmt.run(r.id); } catch (e) {}
+          continue;
+        }
+
+        if (!r.jiraInstanceId || !validInstanceIds.has(r.jiraInstanceId)) {
+          // Try to match instance from ticket id suffix
+          const matchedInst = currentInstances.find((inst) => r.id && r.id.endsWith(`_${inst.id}`));
+          if (matchedInst) {
+            r.jiraInstanceId = matchedInst.id;
+            try { updateInstStmt.run(matchedInst.id, r.id); } catch (e) {}
+          } else if (currentInstances.length === 1) {
+            r.jiraInstanceId = currentInstances[0].id;
+            try { updateInstStmt.run(currentInstances[0].id, r.id); } catch (e) {}
+          } else {
+            // Orphaned ticket from a deleted instance - remove it
+            try { deleteOrphanedStmt.run(r.id); } catch (e) {}
+            continue;
+          }
+        }
+      }
+      filteredRows.push(r);
+    }
+
+    return filteredRows.map((r) => {
+      let labels: string[] = [];
+      let comments: any[] = [];
+      let linkedTicketIds: string[] = [];
+      let linkedNoteIds: string[] = [];
+
+      try { labels = JSON.parse(r.labels || '[]'); } catch (e) {}
+      try { comments = JSON.parse(r.comments || '[]'); } catch (e) {}
+      try { linkedTicketIds = JSON.parse(r.linkedTicketIds || '[]'); } catch (e) {}
+      try { linkedNoteIds = JSON.parse(r.linkedNoteIds || '[]'); } catch (e) {}
+
+      return {
+        id: r.id,
+        key: r.key || '',
+        source: r.source || 'LOCAL',
+        title: r.title || 'Sem Título',
+        description: r.description || '',
+        status: r.status || 'TO_DO',
+        statusLabel: r.statusLabel || 'A Fazer',
+        jiraStatus: r.jiraStatus || '',
+        color: r.color || '#3b82f6',
+        labels,
+        comments,
+        priority: r.priority || 'Normal',
+        assignee: r.assignee || 'Eu',
+        reporter: r.reporter || 'Eu',
+        startDate: r.startDate || '',
+        dueDate: r.dueDate || '',
+        jiraInstanceId: r.jiraInstanceId || '',
+        linkedTicketIds,
+        linkedNoteIds,
+        updatedAt: r.updatedAt,
+        createdAt: r.createdAt,
+      };
+    });
+  } catch (err) {
+    console.error('[SQLite Error dbGetTickets]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveTicket(ticket: Partial<Ticket>): Promise<Ticket> {
+  const id = ticket.id || 'tck_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const now = new Date().toISOString();
+
+  // Find existing row in SQLite if available
+  let existingRow: any = null;
+  if (db) {
+    try {
+      existingRow = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+    } catch (e) {}
+  }
+
+  // Auto-generate TASK-N key for LOCAL tickets if missing
+  let generatedKey = ticket.key || existingRow?.key || '';
+  if ((ticket.source === 'LOCAL' || (!ticket.source && existingRow?.source === 'LOCAL')) && !generatedKey) {
+    try {
+      if (db) {
+        const localRows = db.prepare("SELECT key FROM tickets WHERE source = 'LOCAL'").all() as any[];
+        let maxNum = 0;
+        localRows.forEach((r) => {
+          if (r.key) {
+            const match = String(r.key).match(/^TASK-(\d+)$/i);
+            if (match && match[1]) {
+              const num = parseInt(match[1], 10);
+              if (!isNaN(num) && num > maxNum) maxNum = num;
+            }
+          }
+        });
+        generatedKey = `TASK-${maxNum + 1}`;
+      } else {
+        generatedKey = 'TASK-1';
+      }
+    } catch (e) {
+      generatedKey = 'TASK-1';
+    }
+  }
+
+  // Preserve existing relations if not explicitly provided
+  let existingLinkedIds: string[] = [];
+  let existingLinkedNoteIds: string[] = [];
+  if (existingRow) {
+    try { existingLinkedIds = JSON.parse(existingRow.linkedTicketIds || '[]'); } catch (e) {}
+    try { existingLinkedNoteIds = JSON.parse(existingRow.linkedNoteIds || '[]'); } catch (e) {}
+  }
+
+  const finalLinkedIds = ticket.linkedTicketIds !== undefined ? ticket.linkedTicketIds : existingLinkedIds;
+  const finalLinkedNoteIds = ticket.linkedNoteIds !== undefined ? ticket.linkedNoteIds : existingLinkedNoteIds;
+
+  const sanitizedComments = (ticket.comments || []).map((c: any) => ({
+    id: String(c.id || 'comm_' + Date.now()),
+    author: String(c.author || 'Eu'),
+    body: String(c.body || ''),
+    created: String(c.created || now),
+    isLocal: c.isLocal !== undefined ? Boolean(c.isLocal) : String(c.id || '').startsWith('comm_'),
+  }));
+
+  const data: Ticket = {
+    id,
+    key: generatedKey,
+    source: ticket.source || existingRow?.source || 'LOCAL',
+    title: ticket.title !== undefined ? ticket.title : (existingRow?.title || 'Sem Título'),
+    description: ticket.description !== undefined ? ticket.description : (existingRow?.description || ''),
+    status: ticket.status || existingRow?.status || 'TO_DO',
+    statusLabel: ticket.statusLabel || ticket.status || existingRow?.statusLabel || 'A Fazer',
+    jiraStatus: ticket.jiraStatus !== undefined ? ticket.jiraStatus : (existingRow?.jiraStatus || ''),
+    color: ticket.color || existingRow?.color || '#3b82f6',
+    labels: ticket.labels !== undefined ? ticket.labels : (existingRow ? JSON.parse(existingRow.labels || '[]') : []),
+    comments: ticket.comments !== undefined ? sanitizedComments : (existingRow ? JSON.parse(existingRow.comments || '[]') : []),
+    priority: ticket.priority || existingRow?.priority || 'Normal',
+    assignee: ticket.assignee || existingRow?.assignee || 'Eu',
+    reporter: ticket.reporter || existingRow?.reporter || 'Eu',
+    startDate: ticket.startDate !== undefined ? ticket.startDate : (existingRow?.startDate || ''),
+    dueDate: ticket.dueDate !== undefined ? ticket.dueDate : (existingRow?.dueDate || ''),
+    jiraInstanceId: ticket.jiraInstanceId !== undefined ? ticket.jiraInstanceId : (existingRow?.jiraInstanceId || ''),
+    linkedTicketIds: finalLinkedIds,
+    linkedNoteIds: finalLinkedNoteIds,
+    updatedAt: now,
+    createdAt: ticket.createdAt || existingRow?.createdAt || now,
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO tickets (
+          id, key, source, title, description, status, statusLabel, jiraStatus, color, labels, comments,
+          priority, assignee, reporter, startDate, dueDate, jiraInstanceId, linkedTicketIds,
+          linkedNoteIds, updatedAt, createdAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.key || '',
+        data.source,
+        data.title,
+        data.description,
+        data.status,
+        data.statusLabel || 'A Fazer',
+        data.jiraStatus || '',
+        data.color || '#3b82f6',
+        JSON.stringify(data.labels || []),
+        JSON.stringify(data.comments || []),
+        data.priority || 'Normal',
+        data.assignee || 'Eu',
+        data.reporter || 'Eu',
+        data.startDate || '',
+        data.dueDate || '',
+        data.jiraInstanceId || '',
+        JSON.stringify(data.linkedTicketIds || []),
+        JSON.stringify(data.linkedNoteIds || []),
+        data.updatedAt,
+        data.createdAt
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveTicket]:', err);
+    }
+  }
+
+  return data;
+}
+
+export async function dbDeleteTicket(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteTicket]:', err);
+    }
+  }
+  return true;
+}
+
+export async function dbDeleteTickets(ids: string[]): Promise<boolean> {
+  if (!ids || ids.length === 0) return true;
+  if (db) {
+    try {
+      const deleteStmt = db.prepare('DELETE FROM tickets WHERE id = ?');
+      const deleteMany = db.transaction((ticketIds: string[]) => {
+        for (const tid of ticketIds) {
+          deleteStmt.run(tid);
+        }
+      });
+      deleteMany(ids);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteTickets]:', err);
+    }
+  }
+  return true;
+}
+
+export async function dbBatchUpdateTicketStatus(
+  ids: string[],
+  status: TicketStatus,
+  statusLabel?: string
+): Promise<boolean> {
+  if (!ids || ids.length === 0) return true;
+  const now = new Date().toISOString();
+  const label = statusLabel || (
+    status === 'IN_PROGRESS' ? 'Em Progresso' :
+    status === 'NEXT' ? 'Fazer em Seguida' :
+    status === 'WAITING_CLIENT' ? 'Aguardando Cliente' :
+    status === 'BLOCKED' ? 'Bloqueado' :
+    status === 'DONE' ? 'Concluído' :
+    status === 'BACKLOG' ? 'Backlog' : 'A Fazer'
+  );
+
+  if (db) {
+    try {
+      const updateStmt = db.prepare(`
+        UPDATE tickets 
+        SET status = ?, statusLabel = ?, updatedAt = ?
+        WHERE id = ?
+      `);
+      const updateMany = db.transaction((ticketIds: string[]) => {
+        for (const tid of ticketIds) {
+          updateStmt.run(status, label, now, tid);
+        }
+      });
+      updateMany(ids);
+    } catch (err) {
+      console.error('[SQLite Error dbBatchUpdateTicketStatus]:', err);
+    }
+  }
+  return true;
+}
+
+
+// === REMINDERS ===
+export async function dbGetReminders(): Promise<Reminder[]> {
+  if (!db) return (store.get('reminders_backup') as Reminder[]) || [];
+  try {
+    const rows = db.prepare('SELECT * FROM reminders ORDER BY createdAt DESC').all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      eventId: r.eventId || '',
+      title: r.title,
+      message: r.message,
+      recurrence: r.recurrence,
+      intervalMinutes: r.intervalMinutes,
+      scheduledTime: r.scheduledTime,
+      enabled: Boolean(r.enabled),
+      lastTriggered: r.lastTriggered || '',
+      createdAt: r.createdAt,
+    }));
+  } catch (err) {
+    console.error('[SQLite Error dbGetReminders]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveReminder(reminder: Partial<Reminder>): Promise<Reminder> {
+  const id = reminder.id || 'rem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const now = new Date().toISOString();
+
+  let existingRow: any = null;
+  if (db) {
+    try {
+      existingRow = db.prepare('SELECT * FROM reminders WHERE id = ?').get(id);
+    } catch (e) {}
+  }
+
+  const data: Reminder = {
+    id,
+    eventId: reminder.eventId !== undefined ? reminder.eventId : (existingRow?.eventId || ''),
+    title: reminder.title || existingRow?.title || 'Novo Lembrete',
+    message: reminder.message !== undefined ? reminder.message : (existingRow?.message || ''),
+    recurrence: reminder.recurrence || existingRow?.recurrence || 'INTERVAL',
+    intervalMinutes: reminder.intervalMinutes !== undefined ? Number(reminder.intervalMinutes) : (existingRow?.intervalMinutes || 60),
+    scheduledTime: reminder.scheduledTime !== undefined ? reminder.scheduledTime : (existingRow?.scheduledTime || ''),
+    enabled: reminder.enabled !== undefined ? Boolean(reminder.enabled) : (existingRow ? Boolean(existingRow.enabled) : true),
+    lastTriggered: reminder.lastTriggered !== undefined ? reminder.lastTriggered : (existingRow?.lastTriggered || ''),
+    createdAt: reminder.createdAt || existingRow?.createdAt || now,
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO reminders (id, eventId, title, message, recurrence, intervalMinutes, scheduledTime, enabled, lastTriggered, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.eventId || '',
+        data.title,
+        data.message,
+        data.recurrence,
+        data.intervalMinutes,
+        data.scheduledTime,
+        data.enabled ? 1 : 0,
+        data.lastTriggered || '',
+        data.createdAt
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveReminder]:', err);
+    }
+  }
+
+  return data;
+}
+
+export async function dbDeleteReminder(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      db.prepare('DELETE FROM reminders WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteReminder]:', err);
+    }
+  }
+  return true;
+}
+
+// === NOTES ===
+export async function dbGetNotes(): Promise<NoteItem[]> {
+  if (!db) return (store.get('notes_backup') as NoteItem[]) || [];
+  try {
+    const rows = db.prepare('SELECT * FROM notes ORDER BY updatedAt DESC').all() as any[];
+    return rows.map((r) => {
+      const ext = ((r.filePath || r.title || '').split('.').pop() || '').toLowerCase();
+      const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+      return {
+        id: r.id,
+        title: r.title,
+        filePath: r.filePath,
+        updatedAt: r.updatedAt,
+        format: r.format || (isBinaryFile ? 'file' : 'richtext'),
+        fileType: r.fileType || undefined,
+        originalFileName: r.originalFileName || undefined,
+        fileSize: r.fileSize || undefined,
+        mimeType: r.mimeType || undefined,
+        folderId: r.folderId || undefined,
+        isArchived: Boolean(r.isArchived),
+      };
+    });
+  } catch (err) {
+    console.error('[SQLite Error dbGetNotes]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveNoteMeta(note: Partial<NoteItem>): Promise<NoteItem> {
+  let existing: any = null;
+  if (db) {
+    try {
+      if (note.filePath) {
+        existing = db.prepare('SELECT * FROM notes WHERE filePath = ?').get(note.filePath);
+      }
+      if (!existing && note.id) {
+        existing = db.prepare('SELECT * FROM notes WHERE id = ?').get(note.id);
+      }
+    } catch (e) {}
+  }
+
+  const id = note.id || existing?.id || 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const now = new Date().toISOString();
+  const filePath = note.filePath || existing?.filePath || '';
+  const ext = ((filePath || note.title || '').split('.').pop() || '').toLowerCase();
+  const isBinaryFile = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+
+  const data: NoteItem = {
+    id,
+    title: note.title || existing?.title || 'Nova Anotação',
+    filePath,
+    updatedAt: now,
+    format: note.format || existing?.format || (isBinaryFile ? 'file' : 'richtext'),
+    fileType: note.fileType || existing?.fileType || undefined,
+    originalFileName: note.originalFileName || existing?.originalFileName || undefined,
+    fileSize: note.fileSize !== undefined ? note.fileSize : existing?.fileSize,
+    mimeType: note.mimeType || existing?.mimeType || undefined,
+    folderId: note.folderId !== undefined ? note.folderId : (existing?.folderId || ''),
+    isArchived: note.isArchived !== undefined ? Boolean(note.isArchived) : (existing ? Boolean(existing.isArchived) : false),
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO notes (id, title, filePath, updatedAt, format, fileType, originalFileName, fileSize, mimeType, folderId, isArchived)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.title,
+        data.filePath,
+        data.updatedAt,
+        data.format,
+        data.fileType || null,
+        data.originalFileName || null,
+        data.fileSize || null,
+        data.mimeType || null,
+        data.folderId || '',
+        data.isArchived ? 1 : 0
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveNoteMeta]:', err);
+    }
+  }
+
+  return data;
+}
+
+export async function dbDeleteNoteMeta(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      db.prepare('DELETE FROM notes WHERE id = ? OR filePath = ?').run(id, id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteNoteMeta]:', err);
+    }
+  }
+  return true;
+}
+
+// === NOTE FOLDERS ===
+export async function dbGetNoteFolders(): Promise<NoteFolder[]> {
+  if (!db) return (store.get('note_folders_backup') as NoteFolder[]) || [];
+  try {
+    const rows = db.prepare('SELECT * FROM note_folders ORDER BY createdAt ASC').all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color || '#6366f1',
+      parentId: r.parentId || undefined,
+      clientId: r.clientId || undefined,
+      isArchived: r.isArchived === 1,
+      createdAt: r.createdAt,
+    }));
+  } catch (err) {
+    console.error('[SQLite Error dbGetNoteFolders]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveNoteFolder(folder: Partial<NoteFolder> & { name: string }): Promise<NoteFolder> {
+  const id = folder.id || 'folder_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const name = folder.name.trim();
+  const color = folder.color || '#6366f1';
+  const parentId = folder.parentId || '';
+  const clientId = folder.clientId || '';
+  const isArchived = folder.isArchived ? true : false;
+  const createdAt = folder.createdAt || new Date().toISOString();
+
+  const data: NoteFolder = {
+    id,
+    name,
+    color,
+    parentId: parentId || undefined,
+    clientId: clientId || undefined,
+    isArchived,
+    createdAt,
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO note_folders (id, name, color, parentId, clientId, isArchived, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(data.id, data.name, data.color, parentId, clientId, isArchived ? 1 : 0, data.createdAt);
+    } catch (err) {
+      console.error('[SQLite Error dbSaveNoteFolder]:', err);
+    }
+  }
+  return data;
+}
+
+export async function dbDeleteNoteFolder(id: string, deleteContents: boolean = false): Promise<boolean> {
+  if (db) {
+    try {
+      if (deleteContents) {
+        // Collect all descendant folder IDs recursively
+        const allFolders = db.prepare('SELECT id, parentId FROM note_folders').all() as Array<{ id: string; parentId: string }>;
+        const idsToDelete = new Set<string>([id]);
+
+        let added = true;
+        while (added) {
+          added = false;
+          for (const f of allFolders) {
+            if (f.parentId && idsToDelete.has(f.parentId) && !idsToDelete.has(f.id)) {
+              idsToDelete.add(f.id);
+              added = true;
+            }
+          }
+        }
+
+        const idsArray = Array.from(idsToDelete);
+        const placeholders = idsArray.map(() => '?').join(',');
+
+        // Delete notes inside these folders
+        db.prepare(`DELETE FROM notes WHERE folderId IN (${placeholders})`).run(...idsArray);
+        // Delete the folders
+        db.prepare(`DELETE FROM note_folders WHERE id IN (${placeholders})`).run(...idsArray);
+      } else {
+        const folder = db.prepare('SELECT parentId FROM note_folders WHERE id = ?').get(id) as any;
+        const targetParent = folder?.parentId || '';
+
+        db.prepare('DELETE FROM note_folders WHERE id = ?').run(id);
+        db.prepare('UPDATE note_folders SET parentId = ? WHERE parentId = ?').run(targetParent, id);
+        db.prepare('UPDATE notes SET folderId = ? WHERE folderId = ?').run(targetParent, id);
+      }
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteNoteFolder]:', err);
+    }
+  }
+  return true;
+}
+
+// === USER PROFILES ===
+export async function dbGetUsers(): Promise<UserProfile[]> {
+  if (!db) return (store.get('user_profiles_backup') as UserProfile[]) || [defaultUserProfile];
+  try {
+    const rows = db.prepare('SELECT * FROM user_profiles ORDER BY createdAt ASC').all() as any[];
+    if (rows.length === 0) {
+      await dbSaveUser(defaultUserProfile);
+      return [defaultUserProfile];
+    }
+    return rows.map((r) => {
+      let theme: ThemeConfig = defaultUserProfile.themeConfig;
+      try { theme = JSON.parse(r.themeConfig); } catch (e) {}
+      return {
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        role: r.role,
+        avatarColor: r.avatarColor,
+        themeConfig: theme,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+  } catch (err) {
+    console.error('[SQLite Error dbGetUsers]:', err);
     return [defaultUserProfile];
   }
-  return backup;
 }
 
 export async function dbGetActiveUser(): Promise<UserProfile> {
   const users = await dbGetUsers();
-  const activeId = store.get('active_user_id') as string;
+  const activeId = dbGetSetting('active_user_id');
   if (activeId) {
     const found = users.find((u) => u.id === activeId);
     if (found) return found;
   }
-  store.set('active_user_id', users[0].id);
+  dbSetSetting('active_user_id', users[0].id);
   return users[0];
 }
 
@@ -793,8 +1292,8 @@ export async function dbSetActiveUser(id: string): Promise<UserProfile> {
   const users = await dbGetUsers();
   const found = users.find((u) => u.id === id);
   if (found) {
-    store.set('active_user_id', found.id);
-    store.set('themeConfig', found.themeConfig);
+    dbSetSetting('active_user_id', found.id);
+    dbSetSetting('themeConfig', JSON.stringify(found.themeConfig));
     return found;
   }
   return users[0];
@@ -817,67 +1316,59 @@ export async function dbSaveUser(user: Partial<UserProfile>): Promise<UserProfil
     updatedAt: now,
   };
 
-  try {
-    if (isMongoConnected) {
-      await UserProfileModel.findOneAndUpdate({ id }, data, { upsert: true, new: true });
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO user_profiles (id, name, email, role, avatarColor, themeConfig, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.name,
+        data.email,
+        data.role,
+        data.avatarColor,
+        JSON.stringify(data.themeConfig),
+        data.createdAt,
+        data.updatedAt
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveUser]:', err);
     }
-  } catch (err) {
-    console.error('[MongoDB Error dbSaveUser]:', err);
   }
 
-  try {
-    const current = (store.get('user_profiles_backup') as UserProfile[]) || [];
-    const exists = current.some((u) => u.id === id);
-    const updatedList = exists ? current.map((u) => (u.id === id ? data : u)) : [data, ...current];
-    store.set('user_profiles_backup', updatedList);
-  } catch (e) {}
-
-  const activeId = store.get('active_user_id') as string;
+  const activeId = dbGetSetting('active_user_id');
   if (!activeId || activeId === id) {
-    store.set('active_user_id', id);
-    store.set('themeConfig', data.themeConfig);
+    dbSetSetting('active_user_id', id);
+    dbSetSetting('themeConfig', JSON.stringify(data.themeConfig));
   }
 
   return data;
 }
 
 export async function dbDeleteUser(id: string): Promise<boolean> {
-  try {
-    if (isMongoConnected) {
-      await UserProfileModel.deleteOne({ id });
+  if (db) {
+    try {
+      db.prepare('DELETE FROM user_profiles WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteUser]:', err);
     }
-  } catch (err) {
-    console.error('[MongoDB Error dbDeleteUser]:', err);
   }
 
-  try {
-    const current = (store.get('user_profiles_backup') as UserProfile[]) || [];
-    const updated = current.filter((u) => u.id !== id);
-
-    if (updated.length === 0) {
-      const freshUser: UserProfile = {
-        ...defaultUserProfile,
-        id: `user_${Date.now()}`,
-        name: 'Novo Usuário',
-        email: 'usuario@empresa.com',
-        role: 'Desenvolvedor',
-      };
-      store.set('user_profiles_backup', [freshUser]);
-      store.set('active_user_id', freshUser.id);
-      if (isMongoConnected) {
-        try {
-          await UserProfileModel.create(freshUser);
-        } catch (e) {}
-      }
-    } else {
-      store.set('user_profiles_backup', updated);
-      const activeId = store.get('active_user_id') as string;
-      if (activeId === id) {
-        store.set('active_user_id', updated[0].id);
-        store.set('themeConfig', updated[0].themeConfig);
-      }
+  const remaining = await dbGetUsers();
+  if (remaining.length === 0) {
+    const freshUser: UserProfile = {
+      ...defaultUserProfile,
+      id: `user_${Date.now()}`,
+    };
+    await dbSaveUser(freshUser);
+    dbSetSetting('active_user_id', freshUser.id);
+  } else {
+    const activeId = dbGetSetting('active_user_id');
+    if (activeId === id) {
+      dbSetSetting('active_user_id', remaining[0].id);
+      dbSetSetting('themeConfig', JSON.stringify(remaining[0].themeConfig));
     }
-  } catch (e) {}
+  }
 
   return true;
 }
@@ -889,6 +1380,162 @@ export async function dbSaveActiveUserTheme(theme: ThemeConfig): Promise<boolean
     activeUser.updatedAt = new Date().toISOString();
     await dbSaveUser(activeUser);
   }
-  store.set('themeConfig', theme);
+  dbSetSetting('themeConfig', JSON.stringify(theme));
   return true;
 }
+
+// ─── CLIENTS & ASSETS (JSM STYLE) ──────────────────────────
+
+export async function dbGetClients(): Promise<ClientAsset[]> {
+  if (!db) {
+    const list = (store.get('client_assets_backup') as ClientAsset[]) || [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  try {
+    const rows = db.prepare('SELECT * FROM client_assets ORDER BY name ASC').all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || '',
+      status: (r.status as any) || 'ACTIVE',
+      color: r.color || '#6366f1',
+      icon: r.icon || 'building',
+      instanceIds: r.instanceIds ? JSON.parse(r.instanceIds) : [],
+      linkedTicketIds: r.linkedTicketIds ? JSON.parse(r.linkedTicketIds) : [],
+      linkedNoteIds: r.linkedNoteIds ? JSON.parse(r.linkedNoteIds) : [],
+      linkedFolderIds: r.linkedFolderIds ? JSON.parse(r.linkedFolderIds) : [],
+      linkedEventIds: r.linkedEventIds ? JSON.parse(r.linkedEventIds) : [],
+      linkedReminderIds: r.linkedReminderIds ? JSON.parse(r.linkedReminderIds) : [],
+      contactEmail: r.contactEmail || '',
+      contactPhone: r.contactPhone || '',
+      createdAt: r.createdAt || new Date().toISOString(),
+      updatedAt: r.updatedAt || new Date().toISOString(),
+    }));
+  } catch (err) {
+    console.error('[SQLite Error dbGetClients]:', err);
+    return [];
+  }
+}
+
+export async function dbSaveClient(client: Partial<ClientAsset> & { name: string }): Promise<ClientAsset> {
+  const clients = await dbGetClients();
+  const now = new Date().toISOString();
+  const id = client.id || `client_${Date.now()}`;
+  const existing = clients.find((c) => c.id === id);
+
+  const cleanName = (client.name || existing?.name || 'Novo Cliente').trim();
+  if (!cleanName) {
+    throw new Error('O nome do cliente é obrigatório.');
+  }
+
+  const data: ClientAsset = {
+    id,
+    name: cleanName,
+    description: client.description !== undefined ? client.description : (existing?.description || ''),
+    status: client.status || existing?.status || 'ACTIVE',
+    color: client.color || existing?.color || '#6366f1',
+    icon: client.icon || existing?.icon || 'building',
+    instanceIds: Array.isArray(client.instanceIds) ? client.instanceIds : (existing?.instanceIds || []),
+    linkedTicketIds: Array.isArray(client.linkedTicketIds) ? client.linkedTicketIds : (existing?.linkedTicketIds || []),
+    linkedNoteIds: Array.isArray(client.linkedNoteIds) ? client.linkedNoteIds : (existing?.linkedNoteIds || []),
+    linkedFolderIds: Array.isArray(client.linkedFolderIds) ? client.linkedFolderIds : (existing?.linkedFolderIds || []),
+    linkedEventIds: Array.isArray(client.linkedEventIds) ? client.linkedEventIds : (existing?.linkedEventIds || []),
+    linkedReminderIds: Array.isArray(client.linkedReminderIds) ? client.linkedReminderIds : (existing?.linkedReminderIds || []),
+    contactEmail: client.contactEmail !== undefined ? client.contactEmail : (existing?.contactEmail || ''),
+    contactPhone: client.contactPhone !== undefined ? client.contactPhone : (existing?.contactPhone || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO client_assets (
+          id, name, description, status, color, icon,
+          instanceIds, linkedTicketIds, linkedNoteIds, linkedFolderIds,
+          linkedEventIds, linkedReminderIds, contactEmail, contactPhone,
+          createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.id,
+        data.name,
+        data.description,
+        data.status,
+        data.color,
+        data.icon,
+        JSON.stringify(data.instanceIds || []),
+        JSON.stringify(data.linkedTicketIds || []),
+        JSON.stringify(data.linkedNoteIds || []),
+        JSON.stringify(data.linkedFolderIds || []),
+        JSON.stringify(data.linkedEventIds || []),
+        JSON.stringify(data.linkedReminderIds || []),
+        data.contactEmail,
+        data.contactPhone,
+        data.createdAt,
+        data.updatedAt
+      );
+    } catch (err) {
+      console.error('[SQLite Error dbSaveClient]:', err);
+    }
+  }
+
+  // Also backup to store
+  try {
+    const updatedClients = clients.some((c) => c.id === id)
+      ? clients.map((c) => (c.id === id ? data : c))
+      : [...clients, data];
+    store.set('client_assets_backup', updatedClients);
+  } catch (e) {}
+
+  return data;
+}
+
+export async function dbDeleteClient(id: string): Promise<boolean> {
+  if (db) {
+    try {
+      db.prepare('DELETE FROM client_assets WHERE id = ?').run(id);
+    } catch (err) {
+      console.error('[SQLite Error dbDeleteClient]:', err);
+    }
+  }
+
+  try {
+    const clients = await dbGetClients();
+    store.set('client_assets_backup', clients.filter((c) => c.id !== id));
+  } catch (e) {}
+
+  return true;
+}
+
+export async function dbCreateClientFromJiraInstance(instance: JiraInstance): Promise<ClientAsset> {
+  const clients = await dbGetClients();
+  const instDomain = (instance.domain || '').toLowerCase().trim();
+  const instName = (instance.name || 'Jira Cloud').trim();
+
+  // Check if client already exists for this instance
+  const existing = clients.find((c) => 
+    (c.instanceIds && c.instanceIds.includes(instance.id)) ||
+    c.name.toLowerCase() === instName.toLowerCase() ||
+    (c.description && instDomain && c.description.toLowerCase().includes(instDomain))
+  );
+
+  if (existing) {
+    const updatedInstanceIds = Array.from(new Set([...(existing.instanceIds || []), instance.id]));
+    return await dbSaveClient({
+      ...existing,
+      instanceIds: updatedInstanceIds,
+    });
+  }
+
+  // Create new client asset
+  return await dbSaveClient({
+    name: instName,
+    description: `Instância Jira Cloud conectada automaticamente via Atlassian OAuth (${instance.domain})`,
+    status: 'ACTIVE',
+    color: '#0052cc', // Atlassian Blue
+    icon: 'building',
+    instanceIds: [instance.id],
+  });
+}
+

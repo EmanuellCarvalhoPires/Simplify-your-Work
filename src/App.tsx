@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Sidebar } from './components/layout/Sidebar';
+import { Sidebar, loadStoredSidebarConfig, loadStoredCustomSites } from './components/layout/Sidebar';
 import type { NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
-import { UnifiedHub } from './components/hub/UnifiedHub';
 import { TicketBoard } from './components/tickets/TicketBoard';
 import { ReminderManager } from './components/reminders/ReminderManager';
 import { NoteEditor } from './components/notes/NoteEditor';
 import { CalendarView } from './components/calendar/CalendarView';
+import { ClientsView } from './components/clients/ClientsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { TeamsView } from './components/teams/TeamsView';
+import { OutlookView } from './components/outlook/OutlookView';
+import { AiAssistantView } from './components/ai/AiAssistantView';
+import { CustomWebView } from './components/web/CustomWebView';
 import { FileViewerModal } from './components/common/FileViewerModal';
 import { UserModal } from './components/common/UserModal';
-import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile } from './types/index';
-import { DEFAULT_THEME } from './types/index';
+import { GlobalSearchModal } from './components/search/GlobalSearchModal';
+import type { GlobalSearchResult } from './components/search/GlobalSearchModal';
+import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile, NoteFolder, ClientAsset, CalendarEvent, AiAssistantConfig, SidebarConfig, CustomSite } from './types/index';
+import { DEFAULT_THEME, DEFAULT_AI_CONFIG } from './types/index';
 
 class ViewErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -56,8 +62,100 @@ class ViewErrorBoundary extends React.Component<
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<NavTab>('overview');
+  const [activeTab, setActiveTab] = useState<NavTab>('tickets');
+  const [hasOpenedTeams, setHasOpenedTeams] = useState(true);
+  const [hasOpenedOutlook, setHasOpenedOutlook] = useState(true);
+  const [hasOpenedAi, setHasOpenedAi] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [aiConfig, setAiConfig] = useState<AiAssistantConfig>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_ai_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed.enabledProviders)) {
+          if (parsed.provider && parsed.provider !== 'none' && parsed.provider !== 'rovo') {
+            parsed.enabledProviders = [parsed.provider];
+          } else {
+            parsed.enabledProviders = [];
+          }
+        }
+        parsed.enabledProviders = (parsed.enabledProviders || []).filter((p: string) => p !== 'rovo');
+        delete parsed.provider;
+        delete parsed.customUrl;
+        delete parsed.rovoCustomUrl;
+        return parsed;
+      }
+    } catch (e) {
+      console.error('Erro ao ler simplify_ai_config:', e);
+    }
+    return DEFAULT_AI_CONFIG;
+  });
+
+  useEffect(() => {
+    if (activeTab === 'teams' && !hasOpenedTeams) {
+      setHasOpenedTeams(true);
+    }
+    if (activeTab === 'outlook' && !hasOpenedOutlook) {
+      setHasOpenedOutlook(true);
+    }
+  }, [activeTab, hasOpenedTeams, hasOpenedOutlook]);
+
+  const handleSaveAiConfig = async (config: AiAssistantConfig) => {
+    const cleanConfig: AiAssistantConfig = {
+      enabledProviders: Array.isArray(config.enabledProviders)
+        ? config.enabledProviders.filter((p) => p !== ('rovo' as any))
+        : [],
+    };
+    setAiConfig(cleanConfig);
+    try {
+      localStorage.setItem('simplify_ai_config', JSON.stringify(cleanConfig));
+    } catch (e) {
+      console.error('Erro ao salvar simplify_ai_config:', e);
+    }
+  };
+
+  const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => {
+    return loadStoredSidebarConfig();
+  });
+
+  const handleSaveSidebarConfig = (config: SidebarConfig) => {
+    setSidebarConfig(config);
+    try {
+      localStorage.setItem('simplify_sidebar_config', JSON.stringify(config));
+    } catch (e) {
+      console.error('Erro ao salvar simplify_sidebar_config:', e);
+    }
+  };
+
+  const [customSites, setCustomSites] = useState<CustomSite[]>(() => {
+    return loadStoredCustomSites();
+  });
+
+  const handleSaveCustomSite = (site: CustomSite) => {
+    setCustomSites((prev) => {
+      const exists = prev.some((s) => s.id === site.id);
+      const updated = exists ? prev.map((s) => (s.id === site.id ? site : s)) : [...prev, site];
+      try {
+        localStorage.setItem('simplify_custom_sites', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Erro ao salvar simplify_custom_sites:', e);
+      }
+      return updated;
+    });
+  };
+
+  const handleDeleteCustomSite = (id: string) => {
+    setCustomSites((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      try {
+        localStorage.setItem('simplify_custom_sites', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Erro ao salvar simplify_custom_sites:', e);
+      }
+      return updated;
+    });
+  };
 
   // Initial State loaded from localStorage (Instant local persistence layer)
   const [tickets, setTickets] = useState<Ticket[]>(() => {
@@ -100,6 +198,30 @@ export default function App() {
     }
   });
 
+  const [noteFolders, setNoteFolders] = useState<NoteFolder[]>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_note_folders');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const [clients, setClients] = useState<ClientAsset[]>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_clients');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [targetClientIdForClientsView, setTargetClientIdForClientsView] = useState<string | null>(null);
+  const [targetNoteIdForNotesView, setTargetNoteIdForNotesView] = useState<string | null>(null);
+
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+
   const [themeConfig, setThemeConfig] = useState<ThemeConfig>(() => {
     try {
       const saved = localStorage.getItem('simplify_theme');
@@ -120,6 +242,7 @@ export default function App() {
   });
   const [isInitializing, setIsInitializing] = useState(true);
   const [activeViewerFile, setActiveViewerFile] = useState<string | null>(null);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
 
   useEffect(() => {
     applyThemeToCss(themeConfig);
@@ -131,17 +254,42 @@ export default function App() {
     };
   }, []);
 
-  // Load from MongoDB/Backend when available
+  // Global Keyboard Shortcut: Ctrl + K (or Cmd + K) opens the Jira-Style Omnisearch
   useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsGlobalSearchOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  // Load from Database/Backend when available
+  useEffect(() => {
+    let isDone = false;
+    // Timeout de segurança: garante que a tela de loading nunca trave indefinidamente
+    const fallbackTimeout = setTimeout(() => {
+      if (!isDone) {
+        console.warn('[App] Sincronização inicial com o backend excedeu o tempo limite. Liberando interface...');
+        setIsInitializing(false);
+      }
+    }, 2500);
+
     const loadBackendData = async () => {
       if (window.electronAPI) {
         try {
-          const [tList, jInst, rList, nList, theme] = await Promise.all([
-            window.electronAPI.getTickets(),
-            window.electronAPI.getJiraInstances(),
-            window.electronAPI.getReminders(),
-            window.electronAPI.getNotes(),
-            window.electronAPI.getThemeSettings(),
+          const [tList, jInst, rList, nList, theme, fList, cList, eList] = await Promise.all([
+            window.electronAPI.getTickets().catch(() => []),
+            window.electronAPI.getJiraInstances().catch(() => []),
+            window.electronAPI.getReminders().catch(() => []),
+            window.electronAPI.getNotes().catch(() => []),
+            window.electronAPI.getThemeSettings().catch(() => null),
+            window.electronAPI.getNoteFolders ? window.electronAPI.getNoteFolders().catch(() => []) : Promise.resolve([]),
+            window.electronAPI.getClients ? window.electronAPI.getClients().catch(() => []) : Promise.resolve([]),
+            window.electronAPI.getCalendarEvents ? window.electronAPI.getCalendarEvents().catch(() => []) : Promise.resolve([]),
           ]);
 
           // Reminders sync
@@ -172,11 +320,28 @@ export default function App() {
             localStorage.setItem('simplify_notes', JSON.stringify(safeN));
           }
 
+          // Note Folders sync
+          if (fList && Array.isArray(fList)) {
+            setNoteFolders(fList);
+            localStorage.setItem('simplify_note_folders', JSON.stringify(fList));
+          }
+
+          // Clients sync
+          if (cList && Array.isArray(cList)) {
+            setClients(cList);
+            localStorage.setItem('simplify_clients', JSON.stringify(cList));
+          }
+
+          // Calendar events sync
+          if (eList && Array.isArray(eList)) {
+            setCalendarEvents(eList);
+          }
+
           // Users sync
           if (window.electronAPI.getUsers && window.electronAPI.getActiveUser) {
             const [uList, actU] = await Promise.all([
-              window.electronAPI.getUsers(),
-              window.electronAPI.getActiveUser(),
+              window.electronAPI.getUsers().catch(() => []),
+              window.electronAPI.getActiveUser().catch(() => null),
             ]);
             if (uList && uList.length > 0) setUsers(uList);
             if (actU) {
@@ -195,9 +360,11 @@ export default function App() {
             applyThemeToCss(themeConfig);
           }
         } catch (err) {
-          console.error('Erro ao sincronizar com backend MongoDB:', err);
+          console.error('Erro ao sincronizar com backend:', err);
         }
       }
+      isDone = true;
+      clearTimeout(fallbackTimeout);
       setIsInitializing(false);
     };
 
@@ -217,62 +384,6 @@ export default function App() {
     }
   };
 
-  // Reminders scheduler check loop
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!reminders || reminders.length === 0) return;
-      const now = new Date();
-
-      reminders.forEach(async (r) => {
-        if (!r || !r.enabled) return;
-        const last = r.lastTriggered ? new Date(r.lastTriggered) : null;
-        let due = false;
-
-        if (r.recurrence === 'INTERVAL') {
-          const intervalMs = (Number(r.intervalMinutes) || 60) * 60 * 1000;
-          if (!last || now.getTime() - last.getTime() >= intervalMs) {
-            due = true;
-          }
-        } else if ((r.recurrence === 'DAILY' || r.recurrence === 'ONCE') && r.scheduledTime) {
-          let scheduledDate: Date | null = null;
-          if (r.scheduledTime.includes('T') || r.scheduledTime.includes('-')) {
-            const parsed = new Date(r.scheduledTime);
-            if (!isNaN(parsed.getTime())) scheduledDate = parsed;
-          }
-          if (!scheduledDate) {
-            const timeMatch = r.scheduledTime.match(/(\d{1,2}):(\d{2})/);
-            if (timeMatch) {
-              const th = parseInt(timeMatch[1], 10);
-              const tm = parseInt(timeMatch[2], 10);
-              if (!isNaN(th) && !isNaN(tm)) {
-                scheduledDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0, 0);
-              }
-            }
-          }
-
-          if (scheduledDate && now >= scheduledDate && (!last || last < scheduledDate)) {
-            due = true;
-          }
-        }
-
-        if (due) {
-          console.log(`[CLIENT-SCHEDULER] Lembrete devido: ${r.title}`);
-          if (window.electronAPI && window.electronAPI.testReminder) {
-            await window.electronAPI.testReminder(r);
-          } else if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(`⏰ ${r.title}`, { body: r.message || r.title || 'Lembrete agendado', icon: './assets/app-icon.png' });
-          }
-          await handleSaveReminder({
-            ...r,
-            lastTriggered: now.toISOString(),
-            enabled: r.recurrence === 'ONCE' ? false : r.enabled,
-          });
-        }
-      });
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [reminders]);
 
   const applyThemeToCss = (theme: ThemeConfig) => {
     const root = document.documentElement;
@@ -336,6 +447,7 @@ export default function App() {
         description: issue.fields?.description ? String(issue.fields.description) : '',
         status: 'TO_DO',
         statusLabel: issue.fields?.status?.name || 'A Fazer',
+        jiraStatus: issue.fields?.status?.name || 'A Fazer',
         color: '#0284c7',
         labels: issue.fields?.labels || [],
         comments: [],
@@ -443,6 +555,57 @@ export default function App() {
     });
   };
 
+  const handleDeleteTickets = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+    if (window.electronAPI && window.electronAPI.deleteTickets) {
+      await window.electronAPI.deleteTickets(ids);
+    } else if (window.electronAPI && window.electronAPI.deleteTicket) {
+      await Promise.all(ids.map((id) => window.electronAPI.deleteTicket(id)));
+    }
+    const idsSet = new Set(ids);
+    setTickets((prev) => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      const updatedList = safePrev.filter((t) => !idsSet.has(t.id));
+      localStorage.setItem('simplify_tickets', JSON.stringify(updatedList));
+      return updatedList;
+    });
+  };
+
+  const handleBatchUpdateTicketStatus = async (ids: string[], newStatus: TicketStatus) => {
+    if (!ids || ids.length === 0) return;
+    let statusLabel = 'A Fazer';
+    if (newStatus === 'IN_PROGRESS') statusLabel = 'Em Progresso';
+    if (newStatus === 'DONE') statusLabel = 'Concluído';
+    if (newStatus === 'BLOCKED') statusLabel = 'Bloqueado';
+    if (newStatus === 'NEXT') statusLabel = 'Fazer em Seguida';
+    if (newStatus === 'WAITING_CLIENT') statusLabel = 'Aguardando Cliente';
+    if (newStatus === 'BACKLOG') statusLabel = 'Backlog';
+    if (newStatus === 'PRIORITIZED') statusLabel = 'Priorizado';
+
+    if (window.electronAPI && window.electronAPI.updateTicketStatuses) {
+      await window.electronAPI.updateTicketStatuses(ids, newStatus, statusLabel);
+    }
+
+    const idsSet = new Set(ids);
+    const now = new Date().toISOString();
+    setTickets((prev) => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      const updatedList = safePrev.map((t) => {
+        if (idsSet.has(t.id)) {
+          return {
+            ...t,
+            status: newStatus,
+            statusLabel,
+            updatedAt: now,
+          };
+        }
+        return t;
+      });
+      localStorage.setItem('simplify_tickets', JSON.stringify(updatedList));
+      return updatedList;
+    });
+  };
+
   // Handlers for Jira Instances
   const handleSaveJiraInstance = async (inst: Partial<JiraInstance>) => {
     let saved: JiraInstance;
@@ -473,6 +636,10 @@ export default function App() {
   const handleDeleteJiraInstance = async (id: string) => {
     if (window.electronAPI) {
       await window.electronAPI.deleteJiraInstance(id);
+      const updatedTickets = await window.electronAPI.getTickets();
+      setTickets(Array.isArray(updatedTickets) ? updatedTickets : []);
+    } else {
+      setTickets((prev) => (Array.isArray(prev) ? prev.filter((t) => t.source === 'LOCAL' || (t.jiraInstanceId && t.jiraInstanceId !== id)) : []));
     }
     setJiraInstances((prev) => {
       const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
@@ -533,9 +700,9 @@ export default function App() {
   };
 
   // Handlers for Notes
-  const handleCreateNote = async (title: string) => {
+  const handleCreateNote = async (title: string, folderId?: string) => {
     if (window.electronAPI) {
-      const created = await window.electronAPI.createNote(title);
+      const created = await window.electronAPI.createNote(title, folderId);
       setNotes((prev) => [created, ...prev]);
       return created;
     }
@@ -543,20 +710,21 @@ export default function App() {
       id: `note_${Date.now()}`,
       title,
       filePath: `scratch/${title.toLowerCase().replace(/\s+/g, '_')}.md`,
+      folderId,
       updatedAt: new Date().toISOString(),
     };
     setNotes((prev) => [created, ...prev]);
     return created;
   };
 
-  const handleCreateRichNote = async (title: string) => {
+  const handleCreateRichNote = async (title: string, folderId?: string) => {
     if (window.electronAPI?.createRichNote) {
-      const created = await window.electronAPI.createRichNote(title);
+      const created = await window.electronAPI.createRichNote(title, folderId);
       setNotes((prev) => [created, ...prev]);
       return created;
     }
     // Fallback for non-electron environments
-    return handleCreateNote(title);
+    return handleCreateNote(title, folderId);
   };
 
   const handleSaveFileNote = async (fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number }) => {
@@ -608,12 +776,111 @@ export default function App() {
     setNotes((prev) => prev.filter((n) => n.id !== id));
   };
 
+  const handleUpdateNoteMeta = async (noteMeta: Partial<NoteItem> & { id: string }) => {
+    if (window.electronAPI?.updateNoteMeta) {
+      const updated = await window.electronAPI.updateNoteMeta(noteMeta);
+      setNotes((prev) => prev.map((n) => (n.id === updated.id ? { ...n, ...updated } : n)));
+      return updated;
+    }
+    setNotes((prev) => prev.map((n) => (n.id === noteMeta.id ? { ...n, ...noteMeta } : n)));
+    return noteMeta as NoteItem;
+  };
+
+  const handleSaveFolder = async (folder: Partial<NoteFolder> & { name: string }) => {
+    if (window.electronAPI?.saveNoteFolder) {
+      const saved = await window.electronAPI.saveNoteFolder(folder);
+      setNoteFolders((prev) => {
+        const exists = prev.some((f) => f.id === saved.id);
+        const updated = exists ? prev.map((f) => (f.id === saved.id ? saved : f)) : [...prev, saved];
+        localStorage.setItem('simplify_note_folders', JSON.stringify(updated));
+        return updated;
+      });
+      return saved;
+    }
+    const saved: NoteFolder = {
+      id: folder.id || `folder_${Date.now()}`,
+      name: folder.name,
+      color: folder.color || '#6366f1',
+      parentId: folder.parentId || undefined,
+      clientId: folder.clientId || undefined,
+      isArchived: folder.isArchived || false,
+      createdAt: folder.createdAt || new Date().toISOString(),
+    };
+    setNoteFolders((prev) => {
+      const exists = prev.some((f) => f.id === saved.id);
+      const updated = exists ? prev.map((f) => (f.id === saved.id ? saved : f)) : [...prev, saved];
+      localStorage.setItem('simplify_note_folders', JSON.stringify(updated));
+      return updated;
+    });
+    return saved;
+  };
+
+  const handleDeleteFolder = async (id: string, deleteContents: boolean = false) => {
+    if (window.electronAPI?.deleteNoteFolder) {
+      await window.electronAPI.deleteNoteFolder(id, deleteContents);
+    }
+    setNoteFolders((prev) => {
+      if (deleteContents) {
+        const idsToDelete = new Set<string>([id]);
+        let added = true;
+        while (added) {
+          added = false;
+          for (const f of prev) {
+            if (f.parentId && idsToDelete.has(f.parentId) && !idsToDelete.has(f.id)) {
+              idsToDelete.add(f.id);
+              added = true;
+            }
+          }
+        }
+        const updated = prev.filter((f) => !idsToDelete.has(f.id));
+        localStorage.setItem('simplify_note_folders', JSON.stringify(updated));
+        return updated;
+      } else {
+        const targetFolder = prev.find((f) => f.id === id);
+        const targetParent = targetFolder?.parentId || undefined;
+        const updated = prev
+          .filter((f) => f.id !== id)
+          .map((f) => (f.parentId === id ? { ...f, parentId: targetParent } : f));
+        localStorage.setItem('simplify_note_folders', JSON.stringify(updated));
+        return updated;
+      }
+    });
+
+    if (deleteContents) {
+      const idsToDelete = new Set<string>([id]);
+      let added = true;
+      while (added) {
+        added = false;
+        for (const f of noteFolders) {
+          if (f.parentId && idsToDelete.has(f.parentId) && !idsToDelete.has(f.id)) {
+            idsToDelete.add(f.id);
+            added = true;
+          }
+        }
+      }
+      setNotes((prev) => prev.filter((n) => !n.folderId || !idsToDelete.has(n.folderId)));
+    } else {
+      const targetFolder = noteFolders.find((f) => f.id === id);
+      const targetParent = targetFolder?.parentId || undefined;
+      setNotes((prev) => prev.map((n) => (n.folderId === id ? { ...n, folderId: targetParent } : n)));
+    }
+  };
+
   const handleReorderNotes = (reordered: NoteItem[]) => {
     setNotes(reordered);
     try {
       localStorage.setItem('simplify_notes', JSON.stringify(reordered));
     } catch (e) {
       console.error('Erro ao salvar ordem das anotações no localStorage:', e);
+    }
+  };
+
+  const handleReorderFolders = (reordered: NoteFolder[]) => {
+    setNoteFolders(reordered);
+    try {
+      localStorage.setItem('simplify_note_folders', JSON.stringify(reordered));
+    } catch (e) {
+      console.error('Erro ao salvar ordem das pastas no localStorage:', e);
     }
   };
 
@@ -629,6 +896,65 @@ export default function App() {
     link.click();
     URL.revokeObjectURL(url);
     return true;
+  };
+
+  const handleOpenFileViewer = (fileOrPath: NoteItem | string) => {
+    if (typeof fileOrPath === 'string') {
+      setActiveViewerFile(fileOrPath);
+    } else if (fileOrPath && fileOrPath.filePath) {
+      setActiveViewerFile(fileOrPath.filePath);
+    }
+  };
+
+  // Client Handlers (JSM Style Assets)
+  const handleSaveClient = async (clientData: Partial<ClientAsset> & { name: string }) => {
+    if (window.electronAPI?.saveClient) {
+      const saved = await window.electronAPI.saveClient(clientData);
+      setClients((prev) => {
+        const exists = prev.some((c) => c.id === saved.id);
+        const updated = exists ? prev.map((c) => (c.id === saved.id ? saved : c)) : [...prev, saved];
+        localStorage.setItem('simplify_clients', JSON.stringify(updated));
+        return updated;
+      });
+      return;
+    }
+
+    const saved: ClientAsset = {
+      id: clientData.id || `client_${Date.now()}`,
+      name: clientData.name,
+      description: clientData.description || '',
+      status: clientData.status || 'ACTIVE',
+      color: clientData.color || '#0052cc',
+      icon: clientData.icon || 'building',
+      instanceIds: clientData.instanceIds || [],
+      linkedTicketIds: clientData.linkedTicketIds || [],
+      linkedNoteIds: clientData.linkedNoteIds || [],
+      linkedFolderIds: clientData.linkedFolderIds || [],
+      linkedEventIds: clientData.linkedEventIds || [],
+      linkedReminderIds: clientData.linkedReminderIds || [],
+      contactEmail: clientData.contactEmail || '',
+      contactPhone: clientData.contactPhone || '',
+      createdAt: clientData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setClients((prev) => {
+      const exists = prev.some((c) => c.id === saved.id);
+      const updated = exists ? prev.map((c) => (c.id === saved.id ? saved : c)) : [...prev, saved];
+      localStorage.setItem('simplify_clients', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeleteClient = async (id: string) => {
+    if (window.electronAPI?.deleteClient) {
+      await window.electronAPI.deleteClient(id);
+    }
+    setClients((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      localStorage.setItem('simplify_clients', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   // User Profile Handlers
@@ -694,6 +1020,38 @@ export default function App() {
     }
   };
 
+  // Handler for Global Search Selection (Omnisearch Jira Style)
+  const handleGlobalSearchResultSelect = (result: GlobalSearchResult) => {
+    setIsGlobalSearchOpen(false);
+
+    switch (result.type) {
+      case 'ticket':
+        setActiveTab('tickets');
+        break;
+      case 'note':
+        setActiveTab('notes');
+        break;
+      case 'file':
+        if (result.rawItem && result.rawItem.filePath) {
+          setActiveViewerFile(result.rawItem.filePath);
+        } else {
+          setActiveTab('notes');
+        }
+        break;
+      case 'calendar':
+        setActiveTab('calendar');
+        break;
+      case 'client':
+        setActiveTab('clients');
+        break;
+      case 'reminder':
+        setActiveTab('reminders');
+        break;
+      default:
+        break;
+    }
+  };
+
   if (isInitializing) {
     return (
       <div style={styles.loadingScreen}>
@@ -703,62 +1061,78 @@ export default function App() {
     );
   }
 
+  const isCustomSiteActive = customSites.some((s) => s.id === activeTab);
+  const isFullBleedActive = activeTab === 'teams' || activeTab === 'outlook' || activeTab.startsWith('ai_') || isCustomSiteActive;
+
   return (
     <div style={styles.appWrapper}>
-      <Sidebar activeTab={activeTab} onSelectTab={(tab) => setActiveTab(tab)} />
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        aiConfig={aiConfig}
+        sidebarConfig={sidebarConfig}
+        customSites={customSites}
+      />
 
       <div style={styles.mainContainer}>
-        <Header
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          presetName={themeConfig?.presetName}
-          activeUser={activeUser}
-          users={users}
-          onSelectActiveUser={handleSelectActiveUser}
-          onDeleteUser={handleDeleteUser}
-          onOpenCreateUserModal={() => setUserModalState({ isOpen: true, userToEdit: null })}
-        />
+        {!isFullBleedActive && (
+          <Header
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onOpenGlobalSearch={() => setIsGlobalSearchOpen(true)}
+            presetName={themeConfig?.presetName}
+            activeUser={activeUser}
+            users={users}
+            onSelectActiveUser={handleSelectActiveUser}
+            onDeleteUser={handleDeleteUser}
+            onOpenCreateUserModal={() => setUserModalState({ isOpen: true, userToEdit: null })}
+          />
+        )}
 
         <main style={styles.viewContent}>
           <ViewErrorBoundary>
-            {activeTab === 'overview' && (
-              <UnifiedHub
-                tickets={tickets}
-                reminders={reminders}
-                notes={notes}
-                onSelectTab={(tab) => setActiveTab(tab)}
-                onCardClickTicket={(ticket) => {
-                  setActiveTab('tickets');
-                }}
-                onTestReminder={handleTestReminderFromHub}
-                onCardClickNote={(note) => {
-                  setActiveTab('notes');
-                }}
-              />
-            )}
-
             {activeTab === 'tickets' && (
               <TicketBoard
                 tickets={tickets}
                 notes={notes}
                 jiraInstances={jiraInstances}
                 searchQuery={searchQuery}
+                activeUser={activeUser}
                 onFetchJiraTicket={handleFetchJiraTicket}
                 onRefreshTickets={loadTickets}
                 onSaveTicket={handleSaveTicket}
                 onUpdateStatus={handleUpdateTicketStatus}
                 onDeleteTicket={handleDeleteTicket}
+                onDeleteTickets={handleDeleteTickets}
+                onBatchUpdateStatus={handleBatchUpdateTicketStatus}
                 onOpenSettings={() => setActiveTab('settings')}
+                onNavigateToNote={(noteId) => {
+                  setTargetNoteIdForNotesView(noteId);
+                  setActiveTab('notes');
+                }}
               />
             )}
 
             {activeTab === 'calendar' && (
-              <CalendarView />
+              <CalendarView
+                notes={notes}
+                onOpenFileViewer={handleOpenFileViewer}
+                onCreateNote={handleCreateRichNote}
+              />
             )}
 
             {activeTab === 'notes' && (
               <NoteEditor
                 notes={notes}
+                folders={noteFolders}
+                clients={clients}
+                targetNoteId={targetNoteIdForNotesView}
+                onClearTargetNote={() => setTargetNoteIdForNotesView(null)}
+                onSaveClient={handleSaveClient}
+                onNavigateToClient={(clientId) => {
+                  setTargetClientIdForClientsView(clientId);
+                  setActiveTab('clients');
+                }}
                 onCreateNote={handleCreateNote}
                 onCreateRichNote={handleCreateRichNote}
                 onSaveFileNote={handleSaveFileNote}
@@ -767,6 +1141,32 @@ export default function App() {
                 onDeleteNote={handleDeleteNote}
                 onExportTxt={handleExportTxt}
                 onReorderNotes={handleReorderNotes}
+                onReorderFolders={handleReorderFolders}
+                onSaveFolder={handleSaveFolder}
+                onDeleteFolder={handleDeleteFolder}
+                onUpdateNoteMeta={handleUpdateNoteMeta}
+              />
+            )}
+
+            {activeTab === 'clients' && (
+              <ClientsView
+                clients={clients}
+                tickets={tickets}
+                notes={notes}
+                folders={noteFolders}
+                calendarEvents={calendarEvents}
+                reminders={reminders}
+                jiraInstances={jiraInstances}
+                onSaveClient={handleSaveClient}
+                onDeleteClient={handleDeleteClient}
+                onSaveTicket={handleSaveTicket}
+                onUpdateTicketStatus={handleUpdateTicketStatus}
+                onDeleteTicket={handleDeleteTicket}
+                onReadNoteContent={handleReadNoteContent}
+                onNavigateToNote={(noteId) => {
+                  setTargetNoteIdForNotesView(noteId);
+                  setActiveTab('notes');
+                }}
               />
             )}
 
@@ -778,6 +1178,72 @@ export default function App() {
               />
             )}
 
+            {/* Microsoft Teams View (WebView Isolado e Persistente em Segundo Plano) */}
+            <div
+              style={{
+                display: activeTab === 'teams' ? 'flex' : 'none',
+                flex: 1,
+                width: '100%',
+                height: '100%',
+                overflow: 'hidden',
+              }}
+            >
+              <TeamsView />
+            </div>
+
+            {/* Microsoft Outlook View (WebView Isolado e Persistente em Segundo Plano) */}
+            <div
+              style={{
+                display: activeTab === 'outlook' ? 'flex' : 'none',
+                flex: 1,
+                width: '100%',
+                height: '100%',
+                overflow: 'hidden',
+              }}
+            >
+              <OutlookView />
+            </div>
+
+            {/* AI Assistants Persistent Webviews (ChatGPT, Claude, Gemini) */}
+            {(aiConfig.enabledProviders || (aiConfig.provider && aiConfig.provider !== 'none' ? [aiConfig.provider] : []))
+              .filter((p) => p !== ('rovo' as any))
+              .map((provider) => (
+                <div
+                  key={provider}
+                  style={{
+                    display: activeTab === `ai_${provider}` ? 'flex' : 'none',
+                    flex: 1,
+                    width: '100%',
+                    height: '100%',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <AiAssistantView
+                    provider={provider}
+                    onOpenSettings={() => setActiveTab('settings')}
+                  />
+                </div>
+              ))}
+
+            {/* Custom Sites Persistent Webviews (OneDrive, SharePoint, WhatsApp, GitHub, etc.) */}
+            {customSites.map((site) => (
+              <div
+                key={site.id}
+                style={{
+                  display: activeTab === site.id ? 'flex' : 'none',
+                  flex: 1,
+                  width: '100%',
+                  height: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                <CustomWebView
+                  site={site}
+                  onOpenSettings={() => setActiveTab('settings')}
+                />
+              </div>
+            ))}
+
             {activeTab === 'settings' && (
               <SettingsView
                 jiraInstances={jiraInstances}
@@ -785,6 +1251,13 @@ export default function App() {
                 onDeleteJiraInstance={handleDeleteJiraInstance}
                 themeConfig={themeConfig}
                 onSaveThemeSettings={handleSaveThemeSettings}
+                aiConfig={aiConfig}
+                onSaveAiConfig={handleSaveAiConfig}
+                sidebarConfig={sidebarConfig}
+                onSaveSidebarConfig={handleSaveSidebarConfig}
+                customSites={customSites}
+                onSaveCustomSite={handleSaveCustomSite}
+                onDeleteCustomSite={handleDeleteCustomSite}
                 activeUser={activeUser}
                 users={users}
                 onSelectActiveUser={handleSelectActiveUser}
@@ -794,6 +1267,27 @@ export default function App() {
                 onOpenEditUserModal={(u) => setUserModalState({ isOpen: true, userToEdit: u })}
               />
             )}
+
+            {/* Fallback de Segurança: Garante que a tela NUNCA fique vazia caso a aba ativa não seja encontrada */}
+            {!['tickets', 'calendar', 'notes', 'clients', 'reminders', 'teams', 'outlook', 'settings'].includes(activeTab) &&
+              !activeTab.startsWith('ai_') &&
+              !customSites.some((s) => s.id === activeTab) && (
+                <TicketBoard
+                  tickets={tickets}
+                  notes={notes}
+                  jiraInstances={jiraInstances}
+                  searchQuery={searchQuery}
+                  activeUser={activeUser}
+                  onFetchJiraTicket={handleFetchJiraTicket}
+                  onRefreshTickets={loadTickets}
+                  onSaveTicket={handleSaveTicket}
+                  onUpdateStatus={handleUpdateTicketStatus}
+                  onDeleteTicket={handleDeleteTicket}
+                  onDeleteTickets={handleDeleteTickets}
+                  onBatchUpdateStatus={handleBatchUpdateTicketStatus}
+                  onOpenSettings={() => setActiveTab('settings')}
+                />
+              )}
           </ViewErrorBoundary>
         </main>
       </div>
@@ -812,6 +1306,19 @@ export default function App() {
           onClose={() => setUserModalState({ isOpen: false, userToEdit: null })}
         />
       )}
+
+      {/* Jira-Style Omnisearch / Global Command Palette Modal */}
+      <GlobalSearchModal
+        isOpen={isGlobalSearchOpen}
+        onClose={() => setIsGlobalSearchOpen(false)}
+        tickets={tickets}
+        notes={notes}
+        folders={noteFolders}
+        calendarEvents={calendarEvents}
+        clients={clients}
+        reminders={reminders}
+        onSelectResult={handleGlobalSearchResultSelect}
+      />
     </div>
   );
 }

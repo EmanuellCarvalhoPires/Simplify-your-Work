@@ -134,16 +134,10 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
           );
         });
 
-        if (alreadyExists) {
-          const warningMsg = `O ticket com a chave "${cleanKey}" já existe no aplicativo! Não foi criado um novo ticket.`;
-          setErrorMsg(warningMsg);
-          if (onErrorNotice) onErrorNotice(warningMsg);
-          setLoading(false);
-          return;
-        }
-
         await onFetchJiraTicket(cleanKey, selectedInstanceId);
-        const successText = `Ticket ${cleanKey} puxado e criado com sucesso do Jira!`;
+        const successText = alreadyExists
+          ? `Ticket ${cleanKey} atualizado e vinculado à instância com sucesso!`
+          : `Ticket ${cleanKey} puxado e criado com sucesso do Jira!`;
         setSuccessMsg(successText);
         if (onSuccessNotice) onSuccessNotice(successText);
 
@@ -161,22 +155,20 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
         if (window.electronAPI && window.electronAPI.fetchJiraTicketsByJql) {
           const res = await window.electronAPI.fetchJiraTicketsByJql(cleanJql, selectedInstanceId);
           
-          if (res.newCount === 0 && res.existingCount > 0) {
-            const warningText = `Nenhum novo ticket criado. Os seguintes tickets retornados pela busca JQL já existem no aplicativo: ${res.existingKeys.join(', ')}.`;
-            setErrorMsg(warningText);
-            if (onErrorNotice) onErrorNotice(warningText);
-            setLoading(false);
-            return;
-          } else if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0)) {
+          if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0) && (!res.updatedCount || res.updatedCount === 0)) {
             const infoText = 'Nenhum ticket foi retornado pelo Jira para a consulta JQL informada.';
             setErrorMsg(infoText);
             if (onErrorNotice) onErrorNotice(infoText);
             setLoading(false);
             return;
           } else {
-            let successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
-            if (res.existingCount > 0) {
-              successText += ` (Ignorado(s) ${res.existingCount} ticket(s) já existente(s): ${res.existingKeys.join(', ')})`;
+            let successText = '';
+            if (res.newCount > 0 && res.updatedCount > 0) {
+              successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) e ${res.updatedCount} existente(s) atualizado(s) e vinculado(s) à instância!`;
+            } else if (res.newCount > 0) {
+              successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
+            } else {
+              successText = `🔄 ${res.updatedCount || res.existingCount} ticket(s) já existente(s) atualizado(s) e vinculado(s) à instância com sucesso! (${res.existingKeys.join(', ')})`;
             }
             setSuccessMsg(successText);
             if (onSuccessNotice) onSuccessNotice(successText);
@@ -197,22 +189,20 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
         if (window.electronAPI && window.electronAPI.fetchJiraTicketsByJql) {
           const res = await window.electronAPI.fetchJiraTicketsByJql(cleanFilterInput, selectedInstanceId);
           
-          if (res.newCount === 0 && res.existingCount > 0) {
-            const warningText = `Nenhum novo ticket criado. Os seguintes tickets do filtro já existem no aplicativo: ${res.existingKeys.join(', ')}.`;
-            setErrorMsg(warningText);
-            if (onErrorNotice) onErrorNotice(warningText);
-            setLoading(false);
-            return;
-          } else if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0)) {
+          if (res.newCount === 0 && (!res.existingCount || res.existingCount === 0) && (!res.updatedCount || res.updatedCount === 0)) {
             const infoText = 'Nenhum ticket foi retornado pelo Jira para o filtro informado.';
             setErrorMsg(infoText);
             if (onErrorNotice) onErrorNotice(infoText);
             setLoading(false);
             return;
           } else {
-            let successText = `✨ Filtro Jira importado! ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
-            if (res.existingCount > 0) {
-              successText += ` (Ignorado(s) ${res.existingCount} ticket(s) já existente(s): ${res.existingKeys.join(', ')})`;
+            let successText = '';
+            if (res.newCount > 0 && res.updatedCount > 0) {
+              successText = `✨ Filtro Jira sincronizado! ${res.newCount} novo(s) ticket(s) importado(s) e ${res.updatedCount} existente(s) atualizado(s) e vinculado(s) à instância!`;
+            } else if (res.newCount > 0) {
+              successText = `✨ Filtro Jira importado! ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
+            } else {
+              successText = `🔄 ${res.updatedCount || res.existingCount} ticket(s) do filtro atualizado(s) e vinculado(s) à instância com sucesso! (${res.existingKeys.join(', ')})`;
             }
             setSuccessMsg(successText);
             if (onSuccessNotice) onSuccessNotice(successText);
