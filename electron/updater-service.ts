@@ -43,9 +43,9 @@ function formatUpdaterError(err: any): string {
 export function initAutoUpdater(win: BrowserWindow) {
   targetWindow = win;
 
-  // Don't auto-download immediately without notifying, but allow one-click download or auto-check
+  // Strict manual control: Never auto-download or auto-install on quit
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('checking-for-update', () => {
     sendStatusToWindow({ state: 'checking' });
@@ -105,21 +105,12 @@ export function initAutoUpdater(win: BrowserWindow) {
       if (Notification.isSupported()) {
         new Notification({
           title: '✨ Atualização Baixada com Sucesso!',
-          body: `A versão v${info.version} foi baixada. Reinicie o aplicativo para aplicar as novidades.`,
+          body: `A versão v${info.version} foi baixada. Vá em Configurações > Atualizações para aplicar.`,
           icon: undefined,
         }).show();
       }
     } catch (e) {}
   });
-
-  // Check for updates on startup after 15 seconds (only in packaged production build)
-  setTimeout(() => {
-    try {
-      if (process.env.NODE_ENV !== 'development') {
-        autoUpdater.checkForUpdates().catch(() => {});
-      }
-    } catch (e) {}
-  }, 15000);
 }
 
 export function registerUpdaterIpc() {

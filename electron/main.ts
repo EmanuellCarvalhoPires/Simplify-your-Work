@@ -81,6 +81,15 @@ import type { ThemeConfig, CalendarFeed, NotificationSettings, MeetingStatus } f
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Global crash protection for uncaught async exceptions and rejections
+process.on('uncaughtException', (error) => {
+  console.error('[Electron Uncaught Exception]:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Electron Unhandled Rejection]:', reason);
+});
+
 // Disable automation flags and WebAuthentication/Windows Security Key prompts
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled,WebAuthentication,WebAuthenticationConditionalUI');
 app.commandLine.appendSwitch('disable-features', 'WidgetLayering,WebAuthentication,WebAuthenticationModernDesktop,WebAuthenticationConditionalUI,WebAuthenticationLargeBlob,WebAuthenticationAndroidCredMan');
