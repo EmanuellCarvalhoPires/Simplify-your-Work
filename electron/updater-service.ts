@@ -23,6 +23,23 @@ function sendStatusToWindow(status: UpdateStatus) {
   }
 }
 
+function formatUpdaterError(err: any): string {
+  if (!err) return 'Erro desconhecido ao verificar atualizações';
+  const str = typeof err === 'string' ? err : (err.message || String(err));
+
+  if (str.includes('404') || str.includes('releases.atom') || str.includes('Cannot find latest') || str.includes('latest.yml')) {
+    return 'Nenhuma Release publicada no GitHub ainda (ou repositório privado). Publique a primeira versão em Releases no GitHub para liberar o download automático.';
+  }
+  if (str.includes('ENOTFOUND') || str.includes('ERR_INTERNET_DISCONNECTED') || str.includes('timeout')) {
+    return 'Sem conexão com a internet para checar novas versões no momento.';
+  }
+  if (str.includes('authentication token') || str.includes('Bad credentials')) {
+    return 'Repositório GitHub privado ou autenticação necessária para baixar releases.';
+  }
+  const cleanLine = str.split('\n')[0].trim();
+  return cleanLine.length > 140 ? cleanLine.substring(0, 140) + '...' : cleanLine;
+}
+
 export function initAutoUpdater(win: BrowserWindow) {
   targetWindow = win;
 
@@ -61,7 +78,7 @@ export function initAutoUpdater(win: BrowserWindow) {
   });
 
   autoUpdater.on('error', (err) => {
-    const errorMsg = err == null ? 'Erro desconhecido ao verificar atualizações' : (err.message || String(err));
+    const errorMsg = formatUpdaterError(err);
     sendStatusToWindow({
       state: 'error',
       errorMessage: errorMsg,
@@ -116,11 +133,12 @@ export function registerUpdaterIpc() {
       const result = await autoUpdater.checkForUpdates();
       return result;
     } catch (err: any) {
+      const cleanErr = formatUpdaterError(err);
       sendStatusToWindow({
         state: 'error',
-        errorMessage: err.message || 'Falha ao buscar atualizações no repositório.',
+        errorMessage: cleanErr,
       });
-      throw err;
+      return { error: cleanErr };
     }
   });
 
@@ -129,11 +147,12 @@ export function registerUpdaterIpc() {
     try {
       return await autoUpdater.downloadUpdate();
     } catch (err: any) {
+      const cleanErr = formatUpdaterError(err);
       sendStatusToWindow({
         state: 'error',
-        errorMessage: err.message || 'Falha ao baixar atualização.',
+        errorMessage: cleanErr,
       });
-      throw err;
+      return { error: cleanErr };
     }
   });
 

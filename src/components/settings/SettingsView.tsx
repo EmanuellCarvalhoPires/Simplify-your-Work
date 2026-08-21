@@ -4035,11 +4035,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 )}
                 {updateStatus.state === 'error' && (
                   <span style={{ fontSize: '13px', color: '#f43f5e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <AlertCircle size={16} /> {updateStatus.errorMessage || 'Falha ao buscar atualização.'}
+                    <AlertCircle size={16} /> Verificação concluída com aviso
                   </span>
                 )}
               </div>
             </div>
+
+            {/* Banner de Erro/Aviso Limpo */}
+            {updateStatus.state === 'error' && (
+              <div
+                style={{
+                  backgroundColor: 'rgba(244, 63, 94, 0.08)',
+                  border: '1px solid rgba(244, 63, 94, 0.25)',
+                  borderRadius: '12px',
+                  padding: '16px 20px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '14px',
+                }}
+              >
+                <AlertCircle size={22} color="#f43f5e" style={{ flexShrink: 0 }} />
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#ffffff', marginBottom: '2px' }}>
+                    Nenhuma Release Encontrada no Repositório
+                  </h4>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.5' }}>
+                    {updateStatus.errorMessage || 'O repositório ainda não possui Releases publicadas ou está configurado como privado. Quando uma nova versão for publicada no GitHub, ela aparecerá aqui automaticamente.'}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Ações e Progresso de Download */}
             {updateStatus.state === 'available' && (

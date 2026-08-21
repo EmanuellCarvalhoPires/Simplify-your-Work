@@ -10,7 +10,8 @@
     "convert-assets": "node scripts/convert-assets.mjs",
     "preview": "vite preview",
     "pack": "npm run convert-assets && tsc && vite build && electron-builder --dir",
-    "dist": "npm run convert-assets && tsc && vite build && electron-builder"
+    "dist": "npm run convert-assets && tsc && vite build && electron-builder",
+    "release": "npm run convert-assets && tsc && vite build && electron-builder --publish always"
   },
   "description": "Simplify your Work - Hub Unificado de Produtividade, Gestão de Tickets, Agenda e Clientes",
   "author": "Simplify Team",
