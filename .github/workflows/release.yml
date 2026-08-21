@@ -36,6 +36,17 @@ jobs:
       - name: Build Application (Assets, TypeScript & Vite)
         run: npm run build
 
+      - name: Ensure Git Tag Exists
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Criando tag $TAG..."
+            git tag "$TAG"
+            git push origin "$TAG" || true
+          fi
+
       - name: Build and Publish Release to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
