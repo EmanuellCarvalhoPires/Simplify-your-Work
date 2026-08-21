@@ -136,6 +136,9 @@ const api = {
   saveUser: (user: any) => ipcRenderer.invoke('users:save', user),
   deleteUser: (id: string) => ipcRenderer.invoke('users:delete', id),
 
+  // App Info & Version
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
+
   // Auto Updater
   getUpdateStatus: (): Promise<any> => ipcRenderer.invoke('updater:getStatus'),
   checkForUpdates: (): Promise<any> => ipcRenderer.invoke('updater:checkForUpdates'),

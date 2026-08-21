@@ -129,6 +129,9 @@ export interface ElectronAPI {
   saveUser: (user: Partial<UserProfile>) => Promise<UserProfile>;
   deleteUser: (id: string) => Promise<boolean>;
 
+  // App Info & Version
+  getAppVersion: () => Promise<string>;
+
   // Auto Updater
   getUpdateStatus: () => Promise<{
     state: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';

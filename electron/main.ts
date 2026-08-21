@@ -260,6 +260,11 @@ function setupTray() {
 }
 
 function registerIpcHandlers() {
+  // === APP INFO & VERSION ===
+  ipcMain.handle('app:getVersion', () => {
+    return app.getVersion();
+  });
+
   // === SQLITE DATABASE STATUS & UTILITIES ===
   ipcMain.handle('database:getStats', () => {
     return getDatabaseStats();

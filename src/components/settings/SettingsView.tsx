@@ -123,8 +123,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Auto Updater State
   const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [installedVersion, setInstalledVersion] = useState<string>('v1.0.0');
 
   useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then((v) => {
+        if (v) setInstalledVersion(v.startsWith('v') ? v : `v${v}`);
+      }).catch(() => {});
+    }
+
     if (window.electronAPI?.getUpdateStatus) {
       window.electronAPI.getUpdateStatus().then((status) => {
         if (status) setUpdateStatus(status);
@@ -3876,7 +3883,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <ShieldCheck size={20} color="var(--accent-primary)" /> Sobre & Conformidade Legal
                 </h3>
                 <p style={styles.cardSub}>
-                  Simplify your Work v1.0.0 — Documentos legais e termos de distribuição.
+                  Simplify your Work {installedVersion} — Documentos legais e termos de distribuição.
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -3997,7 +4004,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     Versão Instalada
                   </div>
                   <div style={{ fontSize: '18px', fontWeight: '800', color: '#ffffff' }}>
-                    Simplify your Work v1.0.0
+                    Simplify your Work {installedVersion}
                   </div>
                 </div>
               </div>
