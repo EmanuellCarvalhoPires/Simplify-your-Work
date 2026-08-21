@@ -15,6 +15,7 @@ import { CustomWebView } from './components/web/CustomWebView';
 import { FileViewerModal } from './components/common/FileViewerModal';
 import { UserModal } from './components/common/UserModal';
 import { GlobalSearchModal } from './components/search/GlobalSearchModal';
+import { UpdateModal } from './components/common/UpdateModal';
 import type { GlobalSearchResult } from './components/search/GlobalSearchModal';
 import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile, NoteFolder, ClientAsset, CalendarEvent, AiAssistantConfig, SidebarConfig, CustomSite } from './types/index';
 import { DEFAULT_THEME, DEFAULT_AI_CONFIG } from './types/index';
@@ -243,6 +244,55 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [activeViewerFile, setActiveViewerFile] = useState<string | null>(null);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+
+  // Auto-Update State & Prompt
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
+
+  useEffect(() => {
+    if (window.electronAPI?.onUpdateStatus) {
+      const unsubscribe = window.electronAPI.onUpdateStatus((status) => {
+        if (status) {
+          setUpdateStatus(status);
+          if (status.state === 'available' || status.state === 'downloaded') {
+            setUpdateModalOpen(true);
+          }
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  useEffect(() => {
+    // Verificação automática não-bloqueante no GitHub Releases 2.5s após inicializar o app
+    const checkTimer = setTimeout(async () => {
+      if (window.electronAPI?.checkForUpdates) {
+        try {
+          await window.electronAPI.checkForUpdates();
+        } catch (e) {
+          // Silencioso em caso de falha na verificação de fundo
+        }
+      }
+    }, 2500);
+
+    return () => clearTimeout(checkTimer);
+  }, []);
+
+  const handleDownloadUpdate = async () => {
+    if (window.electronAPI?.downloadUpdate) {
+      try {
+        await window.electronAPI.downloadUpdate();
+      } catch (err: any) {
+        alert(`Falha ao baixar atualização: ${err.message}`);
+      }
+    }
+  };
+
+  const handleInstallUpdate = () => {
+    if (window.electronAPI?.quitAndInstallUpdate) {
+      window.electronAPI.quitAndInstallUpdate();
+    }
+  };
 
   useEffect(() => {
     applyThemeToCss(themeConfig);
@@ -1318,6 +1368,15 @@ export default function App() {
         clients={clients}
         reminders={reminders}
         onSelectResult={handleGlobalSearchResultSelect}
+      />
+
+      {/* Modal / Prompt Interativo de Atualização */}
+      <UpdateModal
+        isOpen={updateModalOpen}
+        updateStatus={updateStatus}
+        onDownload={handleDownloadUpdate}
+        onInstall={handleInstallUpdate}
+        onClose={() => setUpdateModalOpen(false)}
       />
     </div>
   );
