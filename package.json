@@ -1,7 +1,7 @@
 {
   "name": "simplify-your-work",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -44,12 +44,6 @@
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
           "arch": [
             "x64"
           ]
