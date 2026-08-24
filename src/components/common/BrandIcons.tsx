@@ -164,12 +164,78 @@ export const ConfluenceIcon: React.FC<{ size?: number | string; color?: string; 
   </svg>
 );
 
+export const DiscordIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#5865F2' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+  </svg>
+);
+
+export const BitbucketIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#0052CC' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <path d="M2.66 3C2.3 3 2 3.3 2 3.66L4.35 19.67C4.42 20.42 5.06 21 5.82 21H18.17C18.93 21 19.57 20.42 19.64 19.67L22 3.66C22 3.3 21.7 3 21.34 3H2.66ZM13.88 14.54H10.12L9.22 9.46H14.78L13.88 14.54Z" fill={color} />
+  </svg>
+);
+
+export const AzureIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <path d="M13.43 2.54a1 1 0 0 0-.91.59L5.35 17.5a1 1 0 0 0 .52 1.32l5.63 2.5a1 1 0 0 0 1.25-.45l1.64-3.13 4.26 3.17a1 1 0 0 0 1.54-.53l3.77-17a1 1 0 0 0-1.12-1.2L13.43 2.54zm.15 4.39 3.03 7.82-3.83-2.85 1.5-3.62a1 1 0 0 0-.7-1.35z" fill="#0089D6" />
+  </svg>
+);
+
+export const AwsIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#FF9900' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <path d="M6.86 11.23c0-.68.22-1.2.65-1.55.43-.36 1.05-.54 1.85-.54.76 0 1.34.14 1.75.42v1.3a4.2 4.2 0 0 0-1.74-.35c-.87 0-1.3.3-1.3.91 0 .28.1.5.3.66.2.16.53.3 1 .42l.74.2c.8.22 1.38.5 1.76.85.37.34.56.8.56 1.39 0 .8-.26 1.41-.78 1.83-.52.42-1.28.63-2.27.63-.88 0-1.66-.17-2.33-.52v-1.42c.76.47 1.53.7 2.3.7.8 0 1.2-.28 1.2-.84 0-.29-.11-.53-.33-.7-.22-.18-.6-.33-1.13-.47l-.67-.18c-.76-.2-1.32-.47-1.69-.8-.37-.34-.56-.8-.56-1.36zm10.74 3.73-1.39-4.82h1.34l.87 3.51.87-3.51h1.33l-1.39 4.82h-1.63z" fill="#ffffff" />
+    <path d="M3 18.5c5.5 3 12.5 3 18 0" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <path d="M21 16.5l1.5 2.5-3 .5" fill={color} />
+  </svg>
+);
+
+export const LinearIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#5E6AD2' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <path d="M3.5 3.5a1 1 0 0 1 1.41 0l15.59 15.59a1 1 0 0 1-1.41 1.41L3.5 4.91a1 1 0 0 1 0-1.41z"/>
+    <path d="M3.5 10.5a1 1 0 0 1 1.41 0l8.59 8.59a1 1 0 0 1-1.41 1.41L3.5 11.91a1 1 0 0 1 0-1.41z" opacity="0.6"/>
+  </svg>
+);
+
+export const AsanaIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="7" r="4" fill="#F06A6A" />
+    <circle cx="6" cy="16" r="4" fill="#F06A6A" />
+    <circle cx="18" cy="16" r="4" fill="#F06A6A" />
+  </svg>
+);
+
+export const SpotifyIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#1DB954' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.623.623 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.624.624 0 1 1-.278-1.217c3.81-.872 7.076-.499 9.713 1.117a.625.625 0 0 1 .207.857zm1.226-2.723a.78.78 0 0 1-1.073.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 1 1-.453-1.493c3.632-1.102 8.147-.568 11.234 1.329a.78.78 0 0 1 .257 1.073zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.936.936 0 1 1-.543-1.791c3.532-1.072 9.404-.866 13.115 1.338a.936.936 0 0 1-.952 1.609z"/>
+  </svg>
+);
+
+export const YouTubeIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#FF0000' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z" fill={color}/>
+    <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ffffff"/>
+  </svg>
+);
+
+export const LinkedInIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#0A66C2' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 8.76c.97 0 1.75-.79 1.75-1.76s-.78-1.75-1.75-1.75a1.75 1.75 0 0 0-1.75 1.75c0 .97.78 1.76 1.75 1.76m1.37 9.74V9.93H5.09v8.57h2.74z"/>
+  </svg>
+);
+
+export const XTwitterIcon: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size = 16, color = '#ffffff' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+  </svg>
+);
+
 /* ==========================================================================
    2. DICIONÁRIO CENTRAL DE TODOS OS ÍCONES DISPONÍVEIS
    ========================================================================== */
 
 export const ALL_BRAND_AND_LUCIDE_ICONS: Record<string, React.ComponentType<{ size?: number | string; color?: string; className?: string }>> = {
-  // Marcas
+  // Marcas & Ferramentas
   onedrive: OneDriveIcon,
   github: GitHubIcon,
   microsoft: MicrosoftIcon,
@@ -182,6 +248,17 @@ export const ALL_BRAND_AND_LUCIDE_ICONS: Record<string, React.ComponentType<{ si
   slack: SlackIcon,
   gitlab: GitLabIcon,
   confluence: ConfluenceIcon,
+  discord: DiscordIcon,
+  bitbucket: BitbucketIcon,
+  azure: AzureIcon,
+  aws: AwsIcon,
+  linear: LinearIcon,
+  asana: AsanaIcon,
+  spotify: SpotifyIcon,
+  youtube: YouTubeIcon,
+  linkedin: LinkedInIcon,
+  xtwitter: XTwitterIcon,
+  twitter: XTwitterIcon,
 
   // Geral & Web
   globe: Globe,
@@ -256,8 +333,43 @@ export const ALL_BRAND_AND_LUCIDE_ICONS: Record<string, React.ComponentType<{ si
 };
 
 /* ==========================================================================
-   3. COMPONENTE UNIVERSAL: RENDERIZA SVG, LUCIDE OU EMOJI LIVRE DO TECLADO
+   3. COMPONENTE UNIVERSAL: RENDERIZA IMAGEM (UPLOAD/URL), SVG, LUCIDE OU EMOJI
    ========================================================================== */
+
+const CustomImageIcon: React.FC<{
+  src: string;
+  size: number | string;
+  color?: string;
+  className?: string;
+}> = ({ src, size, color = 'currentColor', className }) => {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return <Globe size={size} color={color} className={className} />;
+  }
+
+  const dimension = typeof size === 'number' ? `${size}px` : size;
+
+  return (
+    <img
+      src={src}
+      alt="site-icon"
+      style={{
+        width: dimension,
+        height: dimension,
+        minWidth: dimension,
+        minHeight: dimension,
+        objectFit: 'contain',
+        borderRadius: '4px',
+        flexShrink: 0,
+        display: 'inline-block',
+        verticalAlign: 'middle',
+      }}
+      className={className}
+      onError={() => setHasError(true)}
+    />
+  );
+};
 
 export const DynamicCustomIcon: React.FC<{
   iconKey?: string;
@@ -270,7 +382,18 @@ export const DynamicCustomIcon: React.FC<{
       return <Globe size={size} color={color} className={className} />;
     }
 
-    // Se for um emoji (prefixado com 'emoji:' ou caractere unicode)
+    // 1. Suporte a Imagens customizadas (Upload Base64, URLs Web e Blobs)
+    if (
+      iconKey.startsWith('data:image/') ||
+      iconKey.startsWith('http://') ||
+      iconKey.startsWith('https://') ||
+      iconKey.startsWith('blob:') ||
+      iconKey.startsWith('file://')
+    ) {
+      return <CustomImageIcon src={iconKey} size={size} color={color} className={className} />;
+    }
+
+    // 2. Se for um emoji (prefixado com 'emoji:' ou caractere unicode)
     if (iconKey.startsWith('emoji:')) {
       const emojiChar = iconKey.replace('emoji:', '');
       return (
@@ -331,14 +454,24 @@ export const BRAND_ICON_PRESETS = [
   { id: 'github', label: 'GitHub', icon: GitHubIcon },
   { id: 'microsoft', label: 'Microsoft / 365', icon: MicrosoftIcon },
   { id: 'jira', label: 'Jira / Atlassian', icon: JiraIcon },
+  { id: 'confluence', label: 'Confluence', icon: ConfluenceIcon },
+  { id: 'bitbucket', label: 'Bitbucket', icon: BitbucketIcon },
+  { id: 'azure', label: 'Azure / Cloud', icon: AzureIcon },
+  { id: 'aws', label: 'AWS / Amazon', icon: AwsIcon },
   { id: 'trello', label: 'Trello', icon: TrelloIcon },
   { id: 'notion', label: 'Notion', icon: NotionIcon },
   { id: 'whatsapp', label: 'WhatsApp', icon: WhatsAppIcon },
+  { id: 'discord', label: 'Discord', icon: DiscordIcon },
+  { id: 'slack', label: 'Slack', icon: SlackIcon },
   { id: 'googledrive', label: 'Google Drive', icon: GoogleDriveIcon },
   { id: 'figma', label: 'Figma', icon: FigmaIcon },
-  { id: 'slack', label: 'Slack', icon: SlackIcon },
   { id: 'gitlab', label: 'GitLab', icon: GitLabIcon },
-  { id: 'confluence', label: 'Confluence', icon: ConfluenceIcon },
+  { id: 'linear', label: 'Linear', icon: LinearIcon },
+  { id: 'asana', label: 'Asana', icon: AsanaIcon },
+  { id: 'spotify', label: 'Spotify', icon: SpotifyIcon },
+  { id: 'youtube', label: 'YouTube', icon: YouTubeIcon },
+  { id: 'linkedin', label: 'LinkedIn', icon: LinkedInIcon },
+  { id: 'xtwitter', label: 'X / Twitter', icon: XTwitterIcon },
 ];
 
 export const SYSTEM_ICON_PRESETS = [

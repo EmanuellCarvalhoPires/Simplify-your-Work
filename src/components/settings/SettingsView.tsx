@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { JiraInstance, ThemeConfig, UserProfile, DatabaseStats, CalendarFeed, NotificationSettings, MeetingStatus, AiAssistantConfig, AiProvider, SidebarConfig, SidebarEntry, SidebarGroupEntry, SidebarItemEntry, NavTab, CustomSite } from '../../types/index';
 import { DEFAULT_THEME, AI_PROVIDERS, DEFAULT_AI_CONFIG } from '../../types/index';
 import { ALL_NAV_ITEMS, DEFAULT_SIDEBAR_CONFIG, loadStoredSidebarConfig, normalizeSidebarConfig, getNavItemDef, loadStoredCustomSites, SITE_ICONS } from '../layout/Sidebar';
-import { Key, Palette, Plus, Trash2, Globe, Mail, ShieldCheck, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw, Calendar, Users, UserCheck, Edit3, FolderOpen, Download, HardDrive, FileSpreadsheet, Check, Bell, VolumeX, Video, Radio, Shield, Bot, ExternalLink, LayoutList, FolderPlus, ArrowUp, ArrowDown, Move, ChevronDown, Layers, RotateCcw, Folder, PlusCircle, X, Cloud, Code, Layout, CheckSquare, Zap, BookmarkPlus } from 'lucide-react';
+import { Key, Palette, Plus, Trash2, Globe, Mail, ShieldCheck, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw, Calendar, Users, UserCheck, Edit3, FolderOpen, Download, HardDrive, FileSpreadsheet, Check, Bell, VolumeX, Video, Radio, Shield, Bot, ExternalLink, LayoutList, FolderPlus, ArrowUp, ArrowDown, Move, ChevronDown, Layers, RotateCcw, Folder, PlusCircle, X, Cloud, Code, Layout, CheckSquare, Zap, BookmarkPlus, Upload, Image as ImageIcon, Link2, Loader2, FileImage } from 'lucide-react';
 
 interface SettingsViewProps {
   jiraInstances: JiraInstance[];
@@ -182,10 +182,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [siteUrl, setSiteUrl] = useState('');
   const [siteIcon, setSiteIcon] = useState('globe');
   const [siteColor, setSiteColor] = useState('#0ea5e9');
-  const [siteTargetGroup, setSiteTargetGroup] = useState('root');
-  const [siteIconCategory, setSiteIconCategory] = useState<'brands' | 'system' | 'emoji'>('brands');
+  const [siteIconCategory, setSiteIconCategory] = useState<'brands' | 'system' | 'emoji' | 'upload'>('brands');
   const [siteEmojiInput, setSiteEmojiInput] = useState('');
   const [siteIconSearch, setSiteIconSearch] = useState('');
+  const [customUploadedIcons, setCustomUploadedIcons] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_custom_uploaded_icons');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+  const [customImageUrlInput, setCustomImageUrlInput] = useState('');
+  const [isFetchingFavicon, setIsFetchingFavicon] = useState(false);
+  const siteFileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (customSites && customSites.length > 0) {
@@ -367,6 +378,155 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const saveCustomUploadedIcon = (iconData: string) => {
+    if (!iconData) return;
+    setCustomUploadedIcons((prev) => {
+      const filtered = prev.filter((i) => i !== iconData);
+      const updated = [iconData, ...filtered].slice(0, 30);
+      try {
+        localStorage.setItem('simplify_custom_uploaded_icons', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  };
+
+  const handleDeleteCustomUploadedIcon = (iconToDelete: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCustomUploadedIcons((prev) => {
+      const updated = prev.filter((i) => i !== iconToDelete);
+      try {
+        localStorage.setItem('simplify_custom_uploaded_icons', JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+      return updated;
+    });
+    if (siteIcon === iconToDelete) {
+      setSiteIcon('globe');
+    }
+  };
+
+  const handleFileUpload = (file: File) => {
+    if (!file) return;
+
+    // SVG pode ser mantido em formato Data URL diretamente
+    if (file.type === 'image/svg+xml' || file.name.endsWith('.svg')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setSiteIcon(result);
+          saveCustomUploadedIcon(result);
+        }
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // Para PNG, JPG, WebP e ICO: comprimir e redimensionar para ~128x128 max via Canvas
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const maxDim = 128;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/png', 0.92);
+          setSiteIcon(dataUrl);
+          saveCustomUploadedIcon(dataUrl);
+        } else {
+          const raw = e.target?.result as string;
+          setSiteIcon(raw);
+          saveCustomUploadedIcon(raw);
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFetchFavicon = async (targetUrl?: string) => {
+    const urlToUse = (targetUrl || siteUrl).trim();
+    if (!urlToUse) {
+      alert('Por favor, informe a URL do site primeiro.');
+      return;
+    }
+
+    try {
+      setIsFetchingFavicon(true);
+      let hostname = urlToUse;
+      try {
+        const parsed = new URL(urlToUse.startsWith('http') ? urlToUse : `https://${urlToUse}`);
+        hostname = parsed.hostname;
+      } catch {
+        hostname = urlToUse.replace(/^https?:\/\//, '').split('/')[0];
+      }
+
+      if (!hostname) {
+        alert('URL inválida.');
+        setIsFetchingFavicon(false);
+        return;
+      }
+
+      const faviconUrl = `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`;
+      
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || 64;
+          canvas.height = img.naturalHeight || 64;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL('image/png');
+            setSiteIcon(dataUrl);
+            saveCustomUploadedIcon(dataUrl);
+            setSiteIconCategory('upload');
+            setIsFetchingFavicon(false);
+            return;
+          }
+        } catch {
+          // Fallback silencioso para CORS
+        }
+        setSiteIcon(faviconUrl);
+        saveCustomUploadedIcon(faviconUrl);
+        setSiteIconCategory('upload');
+        setIsFetchingFavicon(false);
+      };
+      img.onerror = () => {
+        setSiteIcon(faviconUrl);
+        saveCustomUploadedIcon(faviconUrl);
+        setSiteIconCategory('upload');
+        setIsFetchingFavicon(false);
+      };
+      img.src = faviconUrl;
+    } catch (err) {
+      console.error(err);
+      setIsFetchingFavicon(false);
+    }
+  };
+
   const handleOpenAddSiteModal = (targetGroupId?: string) => {
     setEditingSite(null);
     setSiteTitle('');
@@ -377,6 +537,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSiteIconCategory('brands');
     setSiteEmojiInput('');
     setSiteIconSearch('');
+    setCustomImageUrlInput('');
     setIsSiteModalOpen(true);
   };
 
@@ -388,8 +549,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSiteIcon(iconVal);
     setSiteColor(site.color || '#0ea5e9');
     setSiteIconSearch('');
+    setCustomImageUrlInput('');
 
-    if (iconVal.startsWith('emoji:') || /\p{Extended_Pictographic}/u.test(iconVal)) {
+    if (
+      iconVal.startsWith('data:image/') ||
+      iconVal.startsWith('http://') ||
+      iconVal.startsWith('https://') ||
+      iconVal.startsWith('blob:') ||
+      iconVal.startsWith('file://')
+    ) {
+      setSiteIconCategory('upload');
+      setSiteEmojiInput('');
+      if (iconVal.startsWith('http')) {
+        setCustomImageUrlInput(iconVal);
+      }
+    } else if (iconVal.startsWith('emoji:') || /\p{Extended_Pictographic}/u.test(iconVal)) {
       setSiteIconCategory('emoji');
       setSiteEmojiInput(iconVal.replace('emoji:', ''));
     } else if (BRAND_ICON_PRESETS.some((b) => b.id === iconVal)) {
@@ -3356,9 +3530,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                   {/* URL do Site */}
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
-                      URL / Link do Site *
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', margin: 0 }}>
+                        URL / Link do Site *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleFetchFavicon()}
+                        disabled={!siteUrl.trim() || isFetchingFavicon}
+                        title="Buscar e definir automaticamente o Favicon oficial deste site"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: siteUrl.trim() ? '#38bdf8' : 'var(--text-muted)',
+                          fontSize: '11px',
+                          cursor: siteUrl.trim() ? 'pointer' : 'not-allowed',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: 0,
+                          transition: 'opacity 0.2s',
+                          opacity: siteUrl.trim() ? 1 : 0.6,
+                        }}
+                      >
+                        {isFetchingFavicon ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin" />
+                            <span>Buscando favicon...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} />
+                            <span>⚡ Buscar Favicon do Site</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                     <input
                       type="text"
                       required
@@ -3396,6 +3603,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             borderRadius: '6px',
                             backgroundColor: `${siteColor}22`,
                             border: `1px solid ${siteColor}44`,
+                            overflow: 'hidden',
                           }}
                         >
                           <DynamicCustomIcon iconKey={siteIcon} size={14} color={siteColor} />
@@ -3413,6 +3621,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         padding: '4px',
                         borderRadius: '8px',
                         border: '1px solid var(--border-subtle)',
+                        flexWrap: 'wrap',
                       }}
                     >
                       <button
@@ -3423,6 +3632,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         }}
                         style={{
                           flex: 1,
+                          minWidth: '100px',
                           padding: '6px 8px',
                           borderRadius: '6px',
                           border: 'none',
@@ -3438,7 +3648,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           gap: '4px',
                         }}
                       >
-                        🌟 Marcas & Apps ({BRAND_ICON_PRESETS.length})
+                        🌟 Marcas ({BRAND_ICON_PRESETS.length})
                       </button>
 
                       <button
@@ -3449,6 +3659,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         }}
                         style={{
                           flex: 1,
+                          minWidth: '100px',
                           padding: '6px 8px',
                           borderRadius: '6px',
                           border: 'none',
@@ -3464,7 +3675,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           gap: '4px',
                         }}
                       >
-                        ⌨️ Sistema & Lucide ({SYSTEM_ICON_PRESETS.length})
+                        ⌨️ Sistema ({SYSTEM_ICON_PRESETS.length})
                       </button>
 
                       <button
@@ -3475,6 +3686,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         }}
                         style={{
                           flex: 1,
+                          minWidth: '80px',
                           padding: '6px 8px',
                           borderRadius: '6px',
                           border: 'none',
@@ -3490,12 +3702,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           gap: '4px',
                         }}
                       >
-                        😀 Emojis Livres
+                        😀 Emojis
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSiteIconCategory('upload');
+                          setSiteIconSearch('');
+                        }}
+                        style={{
+                          flex: 1,
+                          minWidth: '110px',
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          backgroundColor: siteIconCategory === 'upload' ? 'var(--accent-primary)' : 'transparent',
+                          color: siteIconCategory === 'upload' ? '#ffffff' : 'var(--text-secondary)',
+                          fontSize: '11.5px',
+                          fontWeight: siteIconCategory === 'upload' ? 700 : 500,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        🖼️ Upload / URL {customUploadedIcons.length > 0 ? `(${customUploadedIcons.length})` : ''}
                       </button>
                     </div>
 
                     {/* Barra de Pesquisa Rápida (para abas de Marcas e Sistema) */}
-                    {siteIconCategory !== 'emoji' && (
+                    {(siteIconCategory === 'brands' || siteIconCategory === 'system') && (
                       <div style={{ marginBottom: '8px' }}>
                         <input
                           type="text"
@@ -3694,6 +3933,219 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+
+                    {/* 4. Aba de Upload de Imagem, URL e Biblioteca Salva */}
+                    {siteIconCategory === 'upload' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {/* Input de arquivo invisível */}
+                        <input
+                          type="file"
+                          ref={siteFileInputRef}
+                          accept="image/*,.svg,.ico,.png,.jpg,.jpeg,.webp"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleFileUpload(file);
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+
+                        {/* Dropzone de Upload do Computador */}
+                        <div
+                          onClick={() => siteFileInputRef.current?.click()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) {
+                              handleFileUpload(file);
+                            }
+                          }}
+                          style={{
+                            border: '1.5px dashed rgba(255, 255, 255, 0.2)',
+                            borderRadius: '8px',
+                            padding: '12px 10px',
+                            textAlign: 'center',
+                            cursor: 'pointer',
+                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: `${siteColor}22`,
+                              color: siteColor,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Upload size={16} />
+                          </div>
+                          <div style={{ textAlign: 'left' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff' }}>
+                              Escolher imagem do computador (PNG, SVG, JPG, WebP)
+                            </div>
+                            <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                              Redimensionamento automático inteligente de alta performance
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Inserir URL Direta de Imagem */}
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <input
+                            type="text"
+                            placeholder="Ou cole a URL direta de uma imagem (https://.../logo.png)..."
+                            value={customImageUrlInput}
+                            onChange={(e) => setCustomImageUrlInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (customImageUrlInput.trim()) {
+                                  setSiteIcon(customImageUrlInput.trim());
+                                  saveCustomUploadedIcon(customImageUrlInput.trim());
+                                }
+                              }
+                            }}
+                            style={{
+                              flex: 1,
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-subtle)',
+                              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                              color: '#ffffff',
+                              fontSize: '11.5px',
+                              outline: 'none',
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (customImageUrlInput.trim()) {
+                                setSiteIcon(customImageUrlInput.trim());
+                                saveCustomUploadedIcon(customImageUrlInput.trim());
+                              }
+                            }}
+                            disabled={!customImageUrlInput.trim()}
+                            style={{
+                              padding: '0 12px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              backgroundColor: customImageUrlInput.trim() ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.05)',
+                              color: customImageUrlInput.trim() ? '#ffffff' : 'var(--text-muted)',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              cursor: customImageUrlInput.trim() ? 'pointer' : 'not-allowed',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+
+                        {/* Galeria de Ícones Personalizados Salvos */}
+                        {customUploadedIcons.length > 0 && (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                Ícones salvos na sua biblioteca ({customUploadedIcons.length}):
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                Clique para usar
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
+                                gap: '6px',
+                                maxHeight: '96px',
+                                overflowY: 'auto',
+                                padding: '6px',
+                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-subtle)',
+                              }}
+                            >
+                              {customUploadedIcons.map((iconItem, idx) => {
+                                const isSelected = siteIcon === iconItem;
+                                return (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      position: 'relative',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      height: '38px',
+                                      borderRadius: '6px',
+                                      border: isSelected ? `2px solid ${siteColor}` : '1px solid rgba(255, 255, 255, 0.08)',
+                                      backgroundColor: isSelected ? `${siteColor}22` : 'rgba(255, 255, 255, 0.03)',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease',
+                                      padding: '2px',
+                                    }}
+                                    onClick={() => setSiteIcon(iconItem)}
+                                  >
+                                    <DynamicCustomIcon iconKey={iconItem} size={20} color={isSelected ? siteColor : '#ffffff'} />
+                                    
+                                    {/* Botão de Excluir da biblioteca */}
+                                    <button
+                                      type="button"
+                                      title="Remover da biblioteca"
+                                      onClick={(e) => handleDeleteCustomUploadedIcon(iconItem, e)}
+                                      style={{
+                                        position: 'absolute',
+                                        top: '-4px',
+                                        right: '-4px',
+                                        width: '14px',
+                                        height: '14px',
+                                        borderRadius: '50%',
+                                        backgroundColor: '#f43f5e',
+                                        border: 'none',
+                                        color: '#ffffff',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                                      }}
+                                    >
+                                      <X size={9} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
