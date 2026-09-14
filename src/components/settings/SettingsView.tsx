@@ -1,8 +1,65 @@
 import React, { useState, useEffect } from 'react';
-import type { JiraInstance, ThemeConfig, UserProfile, DatabaseStats, CalendarFeed, NotificationSettings, MeetingStatus, AiAssistantConfig, AiProvider, SidebarConfig, SidebarEntry, SidebarGroupEntry, SidebarItemEntry, NavTab, CustomSite } from '../../types/index';
+import type {
+  JiraInstance,
+  ThemeConfig,
+  UserProfile,
+  DatabaseStats,
+  CalendarFeed,
+  NotificationSettings,
+  MeetingStatus,
+  AiAssistantConfig,
+  ActiveAiProvider,
+  SidebarConfig,
+  SidebarEntry,
+  SidebarGroupEntry,
+  NavTab,
+  CustomSite,
+} from '../../types/index';
 import { DEFAULT_THEME, AI_PROVIDERS, DEFAULT_AI_CONFIG } from '../../types/index';
-import { ALL_NAV_ITEMS, DEFAULT_SIDEBAR_CONFIG, loadStoredSidebarConfig, normalizeSidebarConfig, getNavItemDef, loadStoredCustomSites, SITE_ICONS } from '../layout/Sidebar';
-import { Key, Palette, Plus, Trash2, Globe, Mail, ShieldCheck, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw, Calendar, Users, UserCheck, Edit3, FolderOpen, Download, HardDrive, FileSpreadsheet, Check, Bell, VolumeX, Video, Radio, Shield, Bot, ExternalLink, LayoutList, FolderPlus, ArrowUp, ArrowDown, Move, ChevronDown, Layers, RotateCcw, Folder, PlusCircle, X, Cloud, Code, Layout, CheckSquare, Zap, BookmarkPlus, Upload, Image as ImageIcon, Link2, Loader2, FileImage } from 'lucide-react';
+import {
+  DEFAULT_SIDEBAR_CONFIG,
+  loadStoredSidebarConfig,
+  normalizeSidebarConfig,
+  getNavItemDef,
+  loadStoredCustomSites,
+} from '../layout/Sidebar';
+import { CustomSiteModal } from '../common/CustomSiteModal';
+import {
+  Key,
+  Palette,
+  Plus,
+  Trash2,
+  Globe,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+  Database,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Calendar,
+  Users,
+  UserCheck,
+  Edit3,
+  FolderOpen,
+  Download,
+  HardDrive,
+  Check,
+  Bell,
+  VolumeX,
+  Video,
+  Radio,
+  Bot,
+  LayoutList,
+  FolderPlus,
+  ArrowUp,
+  ArrowDown,
+  ChevronDown,
+  RotateCcw,
+  Folder,
+  PlusCircle,
+  Zap,
+} from 'lucide-react';
 
 interface SettingsViewProps {
   jiraInstances: JiraInstance[];
@@ -72,28 +129,6 @@ const themePresets: ThemeConfig[] = [
     textSecondary: '#86efac',
   },
 ];
-
-const COLOR_PRESETS = [
-  '#0ea5e9', // Azul Ciano (Outlook)
-  '#38bdf8', // Azul Claro (Tickets)
-  '#6366f1', // Índigo / Roxo (Tema)
-  '#818cf8', // Lilás (Teams)
-  '#10b981', // Verde Esmeralda
-  '#10a37f', // Verde OpenAI
-  '#f59e0b', // Laranja Calendário
-  '#d97706', // Âmbar Claude
-  '#eab308', // Amarelo Ouro
-  '#f43f5e', // Rosa Alerta
-  '#ec4899', // Pink Neon
-  '#a855f7', // Violeta
-];
-
-import {
-  DynamicCustomIcon,
-  BRAND_ICON_PRESETS,
-  SYSTEM_ICON_PRESETS,
-  EMOJI_KEYBOARD_PRESETS,
-} from '../common/BrandIcons';
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   jiraInstances,
@@ -174,32 +209,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Custom Sites State
   const [localCustomSites, setLocalCustomSites] = useState<CustomSite[]>(() => {
-    return (customSites && customSites.length > 0) ? customSites : loadStoredCustomSites();
+    return customSites !== undefined ? customSites : loadStoredCustomSites();
   });
   const [isSiteModalOpen, setIsSiteModalOpen] = useState(false);
   const [editingSite, setEditingSite] = useState<CustomSite | null>(null);
-  const [siteTitle, setSiteTitle] = useState('');
-  const [siteUrl, setSiteUrl] = useState('');
-  const [siteIcon, setSiteIcon] = useState('globe');
-  const [siteColor, setSiteColor] = useState('#0ea5e9');
-  const [siteIconCategory, setSiteIconCategory] = useState<'brands' | 'system' | 'emoji' | 'upload'>('brands');
-  const [siteEmojiInput, setSiteEmojiInput] = useState('');
-  const [siteIconSearch, setSiteIconSearch] = useState('');
-  const [customUploadedIcons, setCustomUploadedIcons] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('simplify_custom_uploaded_icons');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  });
-  const [customImageUrlInput, setCustomImageUrlInput] = useState('');
-  const [isFetchingFavicon, setIsFetchingFavicon] = useState(false);
-  const siteFileInputRef = React.useRef<HTMLInputElement>(null);
+  const [siteModalTargetGroupId, setSiteModalTargetGroupId] = useState<string>('root');
 
   useEffect(() => {
-    if (customSites && customSites.length > 0) {
+    if (customSites !== undefined) {
       setLocalCustomSites(customSites);
     }
   }, [customSites]);
@@ -221,8 +238,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   }, [sidebarConfig, localCustomSites, aiConfig]);
 
-  const saveSidebarConfigHelper = (config: SidebarConfig, msg?: string) => {
-    const normalized = normalizeSidebarConfig(config, localCustomSites, aiConfig);
+  const saveSidebarConfigHelper = (config: SidebarConfig, msg?: string, customSitesList?: CustomSite[]) => {
+    const sitesToUse = customSitesList !== undefined ? customSitesList : localCustomSites;
+    const normalized = normalizeSidebarConfig(config, sitesToUse, aiConfig);
     setLocalSidebarConfig(normalized);
     try {
       localStorage.setItem('simplify_sidebar_config', JSON.stringify(normalized));
@@ -338,7 +356,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     saveSidebarConfigHelper(updated);
   };
 
-  const handleMoveItemToGroup = (itemId: NavTab, targetGroupId: string | 'root') => {
+  const handleMoveItemToGroup = (itemId: NavTab, targetGroupId: string | 'root', customSitesList?: CustomSite[]) => {
     const cleanedEntries: SidebarEntry[] = [];
     localSidebarConfig.entries.forEach((entry) => {
       if (entry.type === 'item') {
@@ -368,8 +386,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
     }
 
-    const itemLabel = ALL_NAV_ITEMS[itemId]?.label || itemId;
-    saveSidebarConfigHelper({ entries: cleanedEntries }, `Botão "${itemLabel}" reposicionado!`);
+    const sitesToUse = customSitesList !== undefined ? customSitesList : localCustomSites;
+    const itemDef = getNavItemDef(itemId, sitesToUse);
+    const itemLabel = itemDef?.label || itemId;
+    saveSidebarConfigHelper({ entries: cleanedEntries }, `Botão "${itemLabel}" reposicionado!`, sitesToUse);
   };
 
   const handleResetSidebarDefault = () => {
@@ -378,233 +398,55 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const saveCustomUploadedIcon = (iconData: string) => {
-    if (!iconData) return;
-    setCustomUploadedIcons((prev) => {
-      const filtered = prev.filter((i) => i !== iconData);
-      const updated = [iconData, ...filtered].slice(0, 30);
-      try {
-        localStorage.setItem('simplify_custom_uploaded_icons', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
-      return updated;
-    });
-  };
-
-  const handleDeleteCustomUploadedIcon = (iconToDelete: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setCustomUploadedIcons((prev) => {
-      const updated = prev.filter((i) => i !== iconToDelete);
-      try {
-        localStorage.setItem('simplify_custom_uploaded_icons', JSON.stringify(updated));
-      } catch (err) {
-        console.error(err);
-      }
-      return updated;
-    });
-    if (siteIcon === iconToDelete) {
-      setSiteIcon('globe');
-    }
-  };
-
-  const handleFileUpload = (file: File) => {
-    if (!file) return;
-
-    // SVG pode ser mantido em formato Data URL diretamente
-    if (file.type === 'image/svg+xml' || file.name.endsWith('.svg')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        if (result) {
-          setSiteIcon(result);
-          saveCustomUploadedIcon(result);
-        }
-      };
-      reader.readAsDataURL(file);
-      return;
-    }
-
-    // Para PNG, JPG, WebP e ICO: comprimir e redimensionar para ~128x128 max via Canvas
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const maxDim = 128;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/png', 0.92);
-          setSiteIcon(dataUrl);
-          saveCustomUploadedIcon(dataUrl);
-        } else {
-          const raw = e.target?.result as string;
-          setSiteIcon(raw);
-          saveCustomUploadedIcon(raw);
-        }
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleFetchFavicon = async (targetUrl?: string) => {
-    const urlToUse = (targetUrl || siteUrl).trim();
-    if (!urlToUse) {
-      alert('Por favor, informe a URL do site primeiro.');
-      return;
-    }
-
-    try {
-      setIsFetchingFavicon(true);
-      let hostname = urlToUse;
-      try {
-        const parsed = new URL(urlToUse.startsWith('http') ? urlToUse : `https://${urlToUse}`);
-        hostname = parsed.hostname;
-      } catch {
-        hostname = urlToUse.replace(/^https?:\/\//, '').split('/')[0];
-      }
-
-      if (!hostname) {
-        alert('URL inválida.');
-        setIsFetchingFavicon(false);
-        return;
-      }
-
-      const faviconUrl = `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`;
-      
-      const img = new window.Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || 64;
-          canvas.height = img.naturalHeight || 64;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0);
-            const dataUrl = canvas.toDataURL('image/png');
-            setSiteIcon(dataUrl);
-            saveCustomUploadedIcon(dataUrl);
-            setSiteIconCategory('upload');
-            setIsFetchingFavicon(false);
-            return;
-          }
-        } catch {
-          // Fallback silencioso para CORS
-        }
-        setSiteIcon(faviconUrl);
-        saveCustomUploadedIcon(faviconUrl);
-        setSiteIconCategory('upload');
-        setIsFetchingFavicon(false);
-      };
-      img.onerror = () => {
-        setSiteIcon(faviconUrl);
-        saveCustomUploadedIcon(faviconUrl);
-        setSiteIconCategory('upload');
-        setIsFetchingFavicon(false);
-      };
-      img.src = faviconUrl;
-    } catch (err) {
-      console.error(err);
-      setIsFetchingFavicon(false);
-    }
-  };
-
   const handleOpenAddSiteModal = (targetGroupId?: string) => {
     setEditingSite(null);
-    setSiteTitle('');
-    setSiteUrl('');
-    setSiteIcon('globe');
-    setSiteColor('#0ea5e9');
-    setSiteTargetGroup(targetGroupId || 'root');
-    setSiteIconCategory('brands');
-    setSiteEmojiInput('');
-    setSiteIconSearch('');
-    setCustomImageUrlInput('');
+    setSiteModalTargetGroupId(targetGroupId || 'root');
     setIsSiteModalOpen(true);
   };
 
   const handleOpenEditSiteModal = (site: CustomSite) => {
     setEditingSite(site);
-    setSiteTitle(site.title);
-    setSiteUrl(site.url);
-    const iconVal = site.icon || 'globe';
-    setSiteIcon(iconVal);
-    setSiteColor(site.color || '#0ea5e9');
-    setSiteIconSearch('');
-    setCustomImageUrlInput('');
-
-    if (
-      iconVal.startsWith('data:image/') ||
-      iconVal.startsWith('http://') ||
-      iconVal.startsWith('https://') ||
-      iconVal.startsWith('blob:') ||
-      iconVal.startsWith('file://')
-    ) {
-      setSiteIconCategory('upload');
-      setSiteEmojiInput('');
-      if (iconVal.startsWith('http')) {
-        setCustomImageUrlInput(iconVal);
-      }
-    } else if (iconVal.startsWith('emoji:') || /\p{Extended_Pictographic}/u.test(iconVal)) {
-      setSiteIconCategory('emoji');
-      setSiteEmojiInput(iconVal.replace('emoji:', ''));
-    } else if (BRAND_ICON_PRESETS.some((b) => b.id === iconVal)) {
-      setSiteIconCategory('brands');
-      setSiteEmojiInput('');
-    } else {
-      setSiteIconCategory('system');
-      setSiteEmojiInput('');
-    }
-
     let currentGroup = 'root';
     for (const entry of localSidebarConfig.entries) {
-      if (entry.type === 'group' && (entry.itemIds || []).includes(site.id)) {
+      if (entry.type === 'group' && (entry.itemIds || []).includes(site.id as any)) {
         currentGroup = entry.id;
         break;
       }
     }
-    setSiteTargetGroup(currentGroup);
+    setSiteModalTargetGroupId(currentGroup);
     setIsSiteModalOpen(true);
   };
 
-  const handleSaveCustomSiteSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const title = siteTitle.trim();
-    let url = siteUrl.trim();
+  const handleSaveCustomSiteData = async (
+    siteData: {
+      id?: string;
+      title: string;
+      url: string;
+      icon: string;
+      color: string;
+    },
+    targetGroupId: string
+  ) => {
+    const title = siteData.title.trim();
+    let url = siteData.url.trim();
     if (!title || !url) return;
 
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://' + url;
     }
 
-    if (editingSite) {
+    if (siteData.id) {
       const updatedSite: CustomSite = {
-        ...editingSite,
+        id: siteData.id,
         title,
         url,
-        icon: siteIcon,
-        color: siteColor,
+        icon: siteData.icon,
+        color: siteData.color,
+        createdAt: editingSite?.createdAt || new Date().toISOString(),
+        partition: editingSite?.partition || `persist:custom_${siteData.id}`,
       };
 
-      const updatedSites = localCustomSites.map((s) => (s.id === editingSite.id ? updatedSite : s));
+      const updatedSites = localCustomSites.map((s) => (s.id === siteData.id ? updatedSite : s));
       setLocalCustomSites(updatedSites);
       try {
         localStorage.setItem('simplify_custom_sites', JSON.stringify(updatedSites));
@@ -615,21 +457,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         await onSaveCustomSite(updatedSite);
       }
 
-      handleMoveItemToGroup(editingSite.id, siteTargetGroup);
+      // Verifica grupo atual
+      let currentGroup = 'root';
+      for (const entry of localSidebarConfig.entries) {
+        if (entry.type === 'group' && (entry.itemIds || []).includes(siteData.id as any)) {
+          currentGroup = entry.id;
+          break;
+        }
+      }
+
+      if (currentGroup !== targetGroupId) {
+        handleMoveItemToGroup(siteData.id as any, targetGroupId as any, updatedSites);
+      } else {
+        saveSidebarConfigHelper(localSidebarConfig, `Site "${title}" atualizado com sucesso!`, updatedSites);
+      }
+
       setIsSiteModalOpen(false);
-      setSidebarNotice({
-        type: 'success',
-        message: `Site "${title}" atualizado com sucesso!`,
-      });
-      setTimeout(() => setSidebarNotice(null), 3500);
+      setEditingSite(null);
     } else {
       const newId = `site_${Date.now()}`;
       const newSite: CustomSite = {
         id: newId,
         title,
         url,
-        icon: siteIcon,
-        color: siteColor,
+        icon: siteData.icon,
+        color: siteData.color,
+        partition: `persist:custom_${newId}`,
         createdAt: new Date().toISOString(),
       };
 
@@ -645,10 +498,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
 
       const newEntries = [...localSidebarConfig.entries];
-      if (siteTargetGroup === 'root') {
+      if (targetGroupId === 'root') {
         newEntries.push({ type: 'item', id: newId });
       } else {
-        const gIdx = newEntries.findIndex((e) => e.type === 'group' && e.id === siteTargetGroup);
+        const gIdx = newEntries.findIndex((e) => e.type === 'group' && e.id === targetGroupId);
         if (gIdx !== -1) {
           const g = newEntries[gIdx] as SidebarGroupEntry;
           newEntries[gIdx] = {
@@ -660,8 +513,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         }
       }
 
-      saveSidebarConfigHelper({ entries: newEntries }, `Site "${title}" adicionado à barra lateral!`);
+      saveSidebarConfigHelper({ entries: newEntries }, `Site "${title}" adicionado à barra lateral!`, updatedSites);
       setIsSiteModalOpen(false);
+      setEditingSite(null);
     }
   };
 
@@ -697,7 +551,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
     });
 
-    saveSidebarConfigHelper({ entries: cleanedEntries }, `Site "${siteName}" removido.`);
+    saveSidebarConfigHelper({ entries: cleanedEntries }, `Site "${siteName}" removido.`, updatedSites);
   };
 
   // AI Assistant State
@@ -808,9 +662,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [atlassianClientId, setAtlassianClientId] = useState('');
   const [atlassianClientSecret, setAtlassianClientSecret] = useState('');
   const [atlassianProxyUrl, setAtlassianProxyUrl] = useState('');
-  const [isSavingClientId, setIsSavingClientId] = useState(false);
-  const [showOAuthGuide, setShowOAuthGuide] = useState(false);
-  const [clientIdNotice, setClientIdNotice] = useState<string | null>(null);
 
   // Database (SQLite) State
   const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
@@ -819,7 +670,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isExportingDb, setIsExportingDb] = useState(false);
 
   // Calendar Multi-Feeds State
-  const [calendarFeeds, setCalendarFeeds] = useState<CalendarFeed[]>([]);
+  const [, setCalendarFeeds] = useState<CalendarFeed[]>([]);
   const [outlookUrlInput, setOutlookUrlInput] = useState('');
   const [googleUrlInput, setGoogleUrlInput] = useState('');
   const [isSavingCalendar, setIsSavingCalendar] = useState(false);
@@ -923,27 +774,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }).catch((err) => console.error(err));
     }
   }, [activeTab]);
-
-  const handleSaveAtlassianCredentials = async () => {
-    try {
-      setIsSavingClientId(true);
-      if (window.electronAPI?.saveAtlassianClientId) {
-        await window.electronAPI.saveAtlassianClientId(atlassianClientId);
-      }
-      if (window.electronAPI?.saveAtlassianClientSecret) {
-        await window.electronAPI.saveAtlassianClientSecret(atlassianClientSecret);
-      }
-      if (window.electronAPI?.saveAtlassianProxyUrl) {
-        await window.electronAPI.saveAtlassianProxyUrl(atlassianProxyUrl);
-      }
-      setClientIdNotice('✨ Credenciais e URL do Proxy salvas com sucesso!');
-      setTimeout(() => setClientIdNotice(null), 4000);
-    } catch (e: any) {
-      alert(`Erro ao salvar credenciais: ${e.message}`);
-    } finally {
-      setIsSavingClientId(false);
-    }
-  };
 
   const handleAtlassianOAuth = async () => {
     if (!window.electronAPI?.startAtlassianOAuth) return;
@@ -1145,11 +975,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setCalendarNotice(null);
       if (window.electronAPI?.saveCalendarFeed && window.electronAPI?.syncCalendar) {
         await window.electronAPI.saveCalendarFeed({ id: feedId, url: url.trim(), enabled: true });
-        const res = await window.electronAPI.syncCalendar(url.trim(), feedId);
-        if (window.electronAPI.getCalendarFeeds) {
-          const feeds = await window.electronAPI.getCalendarFeeds();
-          if (Array.isArray(feeds)) setCalendarFeeds(feeds);
-        }
+        await window.electronAPI.syncCalendar(url.trim(), feedId);
         setCalendarNotice({
           type: 'success',
           message: `🟢 Agenda ${feedId === 'google' ? 'Google' : 'Outlook'} sincronizada com sucesso!`,
@@ -3415,825 +3241,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Modal de Adição / Edição de Site Personalizado */}
-          {isSiteModalOpen && (
-            <div
-              style={{
-                position: 'fixed',
-                inset: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                backdropFilter: 'blur(6px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 9999,
-                padding: '16px',
-              }}
-            >
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-card-jira, #1e293b)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '16px',
-                  width: '100%',
-                  maxWidth: '520px',
-                  boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  maxHeight: '90vh',
-                }}
-              >
-                {/* Cabeçalho do Modal */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '16px 20px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '8px',
-                        backgroundColor: `${siteColor}22`,
-                      }}
-                    >
-                      <Globe size={18} color={siteColor} />
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#ffffff', margin: 0 }}>
-                        {editingSite ? 'Editar Site Personalizado' : 'Adicionar Site na Barra Lateral'}
-                      </h3>
-                      <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', margin: 0 }}>
-                        Visualização integrada com login e sessão persistentes (estilo Teams/Outlook).
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsSiteModalOpen(false)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      padding: '4px',
-                    }}
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                {/* Corpo do Formulário */}
-                <form
-                  onSubmit={handleSaveCustomSiteSubmit}
-                  style={{
-                    padding: '20px',
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                  }}
-                >
-                  {/* Nome do Site */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
-                      Nome do Site / Sistema *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ex: OneDrive, SharePoint, WhatsApp, GitHub, Trello..."
-                      value={siteTitle}
-                      onChange={(e) => setSiteTitle(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-subtle)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                        color: '#ffffff',
-                        fontSize: '13px',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
-
-                  {/* URL do Site */}
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', margin: 0 }}>
-                        URL / Link do Site *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleFetchFavicon()}
-                        disabled={!siteUrl.trim() || isFetchingFavicon}
-                        title="Buscar e definir automaticamente o Favicon oficial deste site"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: siteUrl.trim() ? '#38bdf8' : 'var(--text-muted)',
-                          fontSize: '11px',
-                          cursor: siteUrl.trim() ? 'pointer' : 'not-allowed',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: 0,
-                          transition: 'opacity 0.2s',
-                          opacity: siteUrl.trim() ? 1 : 0.6,
-                        }}
-                      >
-                        {isFetchingFavicon ? (
-                          <>
-                            <Loader2 size={12} className="animate-spin" />
-                            <span>Buscando favicon...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={12} />
-                            <span>⚡ Buscar Favicon do Site</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ex: https://onedrive.live.com ou github.com"
-                      value={siteUrl}
-                      onChange={(e) => setSiteUrl(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-subtle)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                        color: '#ffffff',
-                        fontSize: '13px',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
-
-                  {/* Seletor de Ícones Rico & Categorizado */}
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', margin: 0 }}>
-                        Ícone do Botão
-                      </label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Selecionado:</span>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '24px',
-                            height: '24px',
-                            borderRadius: '6px',
-                            backgroundColor: `${siteColor}22`,
-                            border: `1px solid ${siteColor}44`,
-                            overflow: 'hidden',
-                          }}
-                        >
-                          <DynamicCustomIcon iconKey={siteIcon} size={14} color={siteColor} />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Abas de Categorias de Ícones */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: '6px',
-                        marginBottom: '10px',
-                        backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                        padding: '4px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-subtle)',
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiteIconCategory('brands');
-                          setSiteIconSearch('');
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '100px',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          backgroundColor: siteIconCategory === 'brands' ? 'var(--accent-primary)' : 'transparent',
-                          color: siteIconCategory === 'brands' ? '#ffffff' : 'var(--text-secondary)',
-                          fontSize: '11.5px',
-                          fontWeight: siteIconCategory === 'brands' ? 700 : 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        🌟 Marcas ({BRAND_ICON_PRESETS.length})
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiteIconCategory('system');
-                          setSiteIconSearch('');
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '100px',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          backgroundColor: siteIconCategory === 'system' ? 'var(--accent-primary)' : 'transparent',
-                          color: siteIconCategory === 'system' ? '#ffffff' : 'var(--text-secondary)',
-                          fontSize: '11.5px',
-                          fontWeight: siteIconCategory === 'system' ? 700 : 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        ⌨️ Sistema ({SYSTEM_ICON_PRESETS.length})
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiteIconCategory('emoji');
-                          setSiteIconSearch('');
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '80px',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          backgroundColor: siteIconCategory === 'emoji' ? 'var(--accent-primary)' : 'transparent',
-                          color: siteIconCategory === 'emoji' ? '#ffffff' : 'var(--text-secondary)',
-                          fontSize: '11.5px',
-                          fontWeight: siteIconCategory === 'emoji' ? 700 : 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        😀 Emojis
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSiteIconCategory('upload');
-                          setSiteIconSearch('');
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '110px',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          backgroundColor: siteIconCategory === 'upload' ? 'var(--accent-primary)' : 'transparent',
-                          color: siteIconCategory === 'upload' ? '#ffffff' : 'var(--text-secondary)',
-                          fontSize: '11.5px',
-                          fontWeight: siteIconCategory === 'upload' ? 700 : 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        🖼️ Upload / URL {customUploadedIcons.length > 0 ? `(${customUploadedIcons.length})` : ''}
-                      </button>
-                    </div>
-
-                    {/* Barra de Pesquisa Rápida (para abas de Marcas e Sistema) */}
-                    {(siteIconCategory === 'brands' || siteIconCategory === 'system') && (
-                      <div style={{ marginBottom: '8px' }}>
-                        <input
-                          type="text"
-                          placeholder="Filtrar ícones..."
-                          value={siteIconSearch}
-                          onChange={(e) => setSiteIconSearch(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '6px 10px',
-                            borderRadius: '6px',
-                            border: '1px solid var(--border-subtle)',
-                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                            color: '#ffffff',
-                            fontSize: '11.5px',
-                            outline: 'none',
-                          }}
-                        />
-                      </div>
-                    )}
-
-                    {/* 1. Grade de Marcas Famosas */}
-                    {siteIconCategory === 'brands' && (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))',
-                          gap: '8px',
-                          maxHeight: '140px',
-                          overflowY: 'auto',
-                          padding: '8px',
-                          backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        {BRAND_ICON_PRESETS.filter((item) =>
-                          item.label.toLowerCase().includes(siteIconSearch.toLowerCase()) ||
-                          item.id.toLowerCase().includes(siteIconSearch.toLowerCase())
-                        ).map((iconOpt) => {
-                          const IconComp = iconOpt.icon;
-                          const isSelected = siteIcon === iconOpt.id;
-
-                          return (
-                            <button
-                              type="button"
-                              key={iconOpt.id}
-                              onClick={() => setSiteIcon(iconOpt.id)}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                gap: '4px',
-                                padding: '8px 4px',
-                                borderRadius: '6px',
-                                border: isSelected ? `2px solid ${siteColor}` : '1px solid rgba(255, 255, 255, 0.06)',
-                                backgroundColor: isSelected ? `${siteColor}22` : 'rgba(255, 255, 255, 0.02)',
-                                color: isSelected ? '#ffffff' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                              }}
-                              title={iconOpt.label}
-                            >
-                              <IconComp size={18} color={isSelected ? siteColor : '#ffffff'} />
-                              <span style={{ fontSize: '10px', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', whiteSpace: 'nowrap' }}>
-                                {iconOpt.label.split('/')[0].trim()}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* 2. Grade de Ícones do Sistema & Teclado */}
-                    {siteIconCategory === 'system' && (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))',
-                          gap: '8px',
-                          maxHeight: '140px',
-                          overflowY: 'auto',
-                          padding: '8px',
-                          backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        {SYSTEM_ICON_PRESETS.filter((item) =>
-                          item.label.toLowerCase().includes(siteIconSearch.toLowerCase()) ||
-                          item.id.toLowerCase().includes(siteIconSearch.toLowerCase())
-                        ).map((iconOpt) => {
-                          const IconComp = iconOpt.icon;
-                          const isSelected = siteIcon === iconOpt.id;
-
-                          return (
-                            <button
-                              type="button"
-                              key={iconOpt.id}
-                              onClick={() => setSiteIcon(iconOpt.id)}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                gap: '4px',
-                                padding: '8px 4px',
-                                borderRadius: '6px',
-                                border: isSelected ? `2px solid ${siteColor}` : '1px solid rgba(255, 255, 255, 0.06)',
-                                backgroundColor: isSelected ? `${siteColor}22` : 'rgba(255, 255, 255, 0.02)',
-                                color: isSelected ? '#ffffff' : 'var(--text-muted)',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                              }}
-                              title={iconOpt.label}
-                            >
-                              <IconComp size={17} color={isSelected ? siteColor : 'currentColor'} />
-                              <span style={{ fontSize: '10px', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', whiteSpace: 'nowrap' }}>
-                                {iconOpt.label.split('/')[0].trim()}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* 3. Grade de Emojis do Teclado + Digitação Livre */}
-                    {siteIconCategory === 'emoji' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {/* Campo para colar ou digitar qualquer emoji */}
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <input
-                            type="text"
-                            placeholder="Cole ou digite qualquer emoji (ex: 🦄, ⚡, 🚀)..."
-                            value={siteEmojiInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSiteEmojiInput(val);
-                              if (val.trim()) {
-                                setSiteIcon(`emoji:${val.trim()}`);
-                              }
-                            }}
-                            style={{
-                              flex: 1,
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                              color: '#ffffff',
-                              fontSize: '13px',
-                              outline: 'none',
-                            }}
-                          />
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                            Atalho: <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '2px 5px', borderRadius: '4px' }}>Win + .</kbd>
-                          </span>
-                        </div>
-
-                        {/* Grade de Emojis Rápidos */}
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(36px, 1fr))',
-                            gap: '6px',
-                            maxHeight: '110px',
-                            overflowY: 'auto',
-                            padding: '8px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                            borderRadius: '8px',
-                            border: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          {EMOJI_KEYBOARD_PRESETS.map((em) => {
-                            const isSelected = siteIcon === `emoji:${em}` || siteIcon === em;
-                            return (
-                              <button
-                                type="button"
-                                key={em}
-                                onClick={() => {
-                                  setSiteIcon(`emoji:${em}`);
-                                  setSiteEmojiInput(em);
-                                }}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  height: '34px',
-                                  borderRadius: '6px',
-                                  fontSize: '18px',
-                                  border: isSelected ? `2px solid ${siteColor}` : '1px solid rgba(255, 255, 255, 0.06)',
-                                  backgroundColor: isSelected ? `${siteColor}33` : 'rgba(255, 255, 255, 0.02)',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.15s ease',
-                                }}
-                              >
-                                {em}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 4. Aba de Upload de Imagem, URL e Biblioteca Salva */}
-                    {siteIconCategory === 'upload' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {/* Input de arquivo invisível */}
-                        <input
-                          type="file"
-                          ref={siteFileInputRef}
-                          accept="image/*,.svg,.ico,.png,.jpg,.jpeg,.webp"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              handleFileUpload(file);
-                              e.target.value = '';
-                            }
-                          }}
-                        />
-
-                        {/* Dropzone de Upload do Computador */}
-                        <div
-                          onClick={() => siteFileInputRef.current?.click()}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const file = e.dataTransfer.files?.[0];
-                            if (file) {
-                              handleFileUpload(file);
-                            }
-                          }}
-                          style={{
-                            border: '1.5px dashed rgba(255, 255, 255, 0.2)',
-                            borderRadius: '8px',
-                            padding: '12px 10px',
-                            textAlign: 'center',
-                            cursor: 'pointer',
-                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                            transition: 'all 0.2s ease',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '10px',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '8px',
-                              backgroundColor: `${siteColor}22`,
-                              color: siteColor,
-                              flexShrink: 0,
-                            }}
-                          >
-                            <Upload size={16} />
-                          </div>
-                          <div style={{ textAlign: 'left' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff' }}>
-                              Escolher imagem do computador (PNG, SVG, JPG, WebP)
-                            </div>
-                            <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
-                              Redimensionamento automático inteligente de alta performance
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Inserir URL Direta de Imagem */}
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <input
-                            type="text"
-                            placeholder="Ou cole a URL direta de uma imagem (https://.../logo.png)..."
-                            value={customImageUrlInput}
-                            onChange={(e) => setCustomImageUrlInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                if (customImageUrlInput.trim()) {
-                                  setSiteIcon(customImageUrlInput.trim());
-                                  saveCustomUploadedIcon(customImageUrlInput.trim());
-                                }
-                              }
-                            }}
-                            style={{
-                              flex: 1,
-                              padding: '7px 10px',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                              color: '#ffffff',
-                              fontSize: '11.5px',
-                              outline: 'none',
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (customImageUrlInput.trim()) {
-                                setSiteIcon(customImageUrlInput.trim());
-                                saveCustomUploadedIcon(customImageUrlInput.trim());
-                              }
-                            }}
-                            disabled={!customImageUrlInput.trim()}
-                            style={{
-                              padding: '0 12px',
-                              borderRadius: '6px',
-                              border: 'none',
-                              backgroundColor: customImageUrlInput.trim() ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.05)',
-                              color: customImageUrlInput.trim() ? '#ffffff' : 'var(--text-muted)',
-                              fontSize: '11.5px',
-                              fontWeight: 600,
-                              cursor: customImageUrlInput.trim() ? 'pointer' : 'not-allowed',
-                              whiteSpace: 'nowrap',
-                              transition: 'all 0.15s ease',
-                            }}
-                          >
-                            Aplicar
-                          </button>
-                        </div>
-
-                        {/* Galeria de Ícones Personalizados Salvos */}
-                        {customUploadedIcons.length > 0 && (
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                                Ícones salvos na sua biblioteca ({customUploadedIcons.length}):
-                              </span>
-                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                Clique para usar
-                              </span>
-                            </div>
-                            <div
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fill, minmax(40px, 1fr))',
-                                gap: '6px',
-                                maxHeight: '96px',
-                                overflowY: 'auto',
-                                padding: '6px',
-                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border-subtle)',
-                              }}
-                            >
-                              {customUploadedIcons.map((iconItem, idx) => {
-                                const isSelected = siteIcon === iconItem;
-                                return (
-                                  <div
-                                    key={idx}
-                                    style={{
-                                      position: 'relative',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      height: '38px',
-                                      borderRadius: '6px',
-                                      border: isSelected ? `2px solid ${siteColor}` : '1px solid rgba(255, 255, 255, 0.08)',
-                                      backgroundColor: isSelected ? `${siteColor}22` : 'rgba(255, 255, 255, 0.03)',
-                                      cursor: 'pointer',
-                                      transition: 'all 0.15s ease',
-                                      padding: '2px',
-                                    }}
-                                    onClick={() => setSiteIcon(iconItem)}
-                                  >
-                                    <DynamicCustomIcon iconKey={iconItem} size={20} color={isSelected ? siteColor : '#ffffff'} />
-                                    
-                                    {/* Botão de Excluir da biblioteca */}
-                                    <button
-                                      type="button"
-                                      title="Remover da biblioteca"
-                                      onClick={(e) => handleDeleteCustomUploadedIcon(iconItem, e)}
-                                      style={{
-                                        position: 'absolute',
-                                        top: '-4px',
-                                        right: '-4px',
-                                        width: '14px',
-                                        height: '14px',
-                                        borderRadius: '50%',
-                                        backgroundColor: '#f43f5e',
-                                        border: 'none',
-                                        color: '#ffffff',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        cursor: 'pointer',
-                                        padding: 0,
-                                        boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
-                                      }}
-                                    >
-                                      <X size={9} />
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Seletor de Cores */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
-                      Cor do Badge
-                    </label>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {COLOR_PRESETS.map((c) => (
-                        <div
-                          key={c}
-                          onClick={() => setSiteColor(c)}
-                          style={{
-                            width: '24px',
-                            height: '24px',
-                            borderRadius: '50%',
-                            backgroundColor: c,
-                            cursor: 'pointer',
-                            border: siteColor === c ? '2px solid #ffffff' : '2px solid transparent',
-                            boxShadow: siteColor === c ? `0 0 8px ${c}` : 'none',
-                            transform: siteColor === c ? 'scale(1.15)' : 'scale(1)',
-                            transition: 'all 0.15s ease',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Tópico de Destino */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
-                      Tópico de Destino na Barra Lateral
-                    </label>
-                    <select
-                      value={siteTargetGroup}
-                      onChange={(e) => setSiteTargetGroup(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-subtle)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                        color: '#ffffff',
-                        fontSize: '13px',
-                        outline: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <option value="root">📂 Botão Avulso (Nível Raiz)</option>
-                      {localSidebarConfig.entries
-                        .filter((e): e is SidebarGroupEntry => e.type === 'group')
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>
-                            📁 Agrupar em: {g.title}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-
-                  {/* Ações do Modal */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsSiteModalOpen(false)}
-                      className="btn btn-secondary"
-                      style={{ padding: '8px 16px', fontSize: '13px' }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      style={{
-                        padding: '8px 18px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        backgroundColor: siteColor || 'var(--accent-primary)',
-                      }}
-                    >
-                      {editingSite ? 'Salvar Alterações' : 'Salvar e Adicionar'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
+          {/* Modal Reutilizável de Adição / Edição de Site Personalizado */}
+          <CustomSiteModal
+            isOpen={isSiteModalOpen}
+            siteToEdit={editingSite}
+            targetGroupId={siteModalTargetGroupId}
+            availableGroups={localSidebarConfig.entries.filter(
+              (e): e is SidebarGroupEntry => e.type === 'group'
+            )}
+            onSave={handleSaveCustomSiteData}
+            onClose={() => {
+              setIsSiteModalOpen(false);
+              setEditingSite(null);
+            }}
+            onDelete={handleDeleteCustomSiteAction}
+          />
         </div>
       )}
 

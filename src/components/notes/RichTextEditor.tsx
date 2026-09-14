@@ -406,6 +406,10 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ content, onChang
       attributes: {
         class: 'rich-editor-area',
         spellcheck: 'true',
+        lang: 'pt-BR',
+        autocomplete: 'on',
+        autocorrect: 'on',
+        autocapitalize: 'sentences',
       },
       handleKeyDown: (view, event) => {
         if (event.key === 'Tab') {
@@ -611,10 +615,10 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ content, onChang
     const url = window.prompt('URL do link:', prev || 'https://');
     if (url === null) return;
     if (url === '') {
-      editor.chain().focus().extendMarkToNextWord().unsetLink().run();
+      (editor.chain().focus() as any).extendMarkRange('link').unsetLink().run();
       return;
     }
-    editor.chain().focus().extendMarkToNextWord().setLink({ href: url }).run();
+    (editor.chain().focus() as any).extendMarkRange('link').setLink({ href: url }).run();
   }, [editor]);
 
   const handleInsertTable = useCallback(() => {
@@ -749,7 +753,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ content, onChang
       {editor && !editor.isDestroyed && (
         <BubbleMenu
           editor={editor}
-          tippyOptions={{ duration: 100 }}
+          {...({ tippyOptions: { duration: 100 } } as any)}
           shouldShow={({ editor, state }) => {
             // Do not show if selection is collapsed / empty
             if (state.selection.empty) return false;

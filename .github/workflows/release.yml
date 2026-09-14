@@ -50,4 +50,16 @@ jobs:
       - name: Build and Publish Release to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --publish always
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --publish always -c.publish.releaseType=release
+
+      - name: Publish GitHub Release (Ensure Not Draft)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          echo "Publicando release $TAG no GitHub..."
+          gh release edit "$TAG" --draft=false --latest || true

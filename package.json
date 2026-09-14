@@ -1,7 +1,7 @@
 {
   "name": "simplify-your-work",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -22,7 +22,8 @@
     "publish": {
       "provider": "github",
       "owner": "EmanuellCarvalhoPires",
-      "repo": "Simplify-your-Work"
+      "repo": "Simplify-your-Work",
+      "releaseType": "release"
     },
     "npmRebuild": false,
     "asar": true,

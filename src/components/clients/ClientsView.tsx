@@ -15,24 +15,16 @@ import {
   Mail,
   Phone,
   Clock,
-  Tag,
-  CheckCircle2,
-  AlertCircle,
-  Folder,
   LayoutDashboard,
   Unlink,
   Link as LinkIcon,
-  ChevronRight,
-  Filter,
   Check,
   X,
-  Calendar as CalendarIcon,
   Copy,
   Eye,
   MapPin,
   Video,
   GripVertical,
-  ArrowUpDown,
   ChevronUp,
   ChevronDown,
   ListOrdered,
@@ -385,34 +377,29 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setDragOverOverviewId(null);
   };
 
-  const handleOpenOverviewItem = async (item: typeof sortedOverviewItems[0]) => {
-    if (item.type === 'ticket') {
-      setPreviewTicket(item.rawItem);
-    } else if (item.type === 'note') {
-      const note = item.rawItem as NoteItem;
-      const isFile =
-        note.format === 'file' ||
-        ['pdf', 'docx', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp'].includes(
-          ((note.filePath || note.title || '').split('.').pop() || '').toLowerCase()
-        );
-      if (isFile && onOpenFileViewer) {
-        onOpenFileViewer(note);
-        return;
-      }
-      let content = '';
-      if (note.filePath && (window as any).electronAPI?.readFile) {
+  const handleOpenNotePreview = async (note: NoteItem) => {
+    if (note.format === 'file' || note.originalFileName) {
+      (window as any).openFileViewer?.(note.filePath);
+    } else {
+      let content = note.content || '';
+      if (onReadNoteContent && note.filePath) {
         try {
-          const res = await (window as any).electronAPI.readFile(note.filePath);
-          if (res && res.success) {
-            content = res.content || '';
-          }
+          content = await onReadNoteContent(note.filePath);
         } catch (e) {
           console.error(e);
         }
       }
       setPreviewNote({ note, content });
+    }
+  };
+
+  const handleOpenOverviewItem = async (item: typeof sortedOverviewItems[0]) => {
+    if (item.type === 'ticket') {
+      setPreviewTicket(item.rawItem);
+    } else if (item.type === 'note') {
+      await handleOpenNotePreview(item.rawItem as NoteItem);
     } else if (item.type === 'meeting') {
-      setPreviewMeeting(item.rawItem);
+      setPreviewEvent(item.rawItem);
     } else if (item.type === 'reminder') {
       setPreviewReminder(item.rawItem);
     }
@@ -1526,22 +1513,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {clientNotes.map((note) => {
-                    const handleNoteClick = async () => {
-                      if (note.format === 'file' || note.originalFileName) {
-                        (window as any).openFileViewer?.(note.filePath);
-                      } else {
-                        let content = note.content || '';
-                        if (onReadNoteContent && note.filePath) {
-                          try {
-                            content = await onReadNoteContent(note.filePath);
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }
-                        setPreviewNote({ note, content });
-                      }
-                    };
-
                     return (
                       <div
                         key={note.id}
@@ -1558,7 +1529,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       >
                         <div
                           style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, cursor: 'pointer' }}
-                          onClick={handleNoteClick}
+                          onClick={() => handleOpenNotePreview(note)}
                           title="Clique para visualizar o documento"
                         >
                           <FileText size={16} color="var(--accent-primary)" />
@@ -1573,7 +1544,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <button
                             type="button"
-                            onClick={handleNoteClick}
+                            onClick={() => handleOpenNotePreview(note)}
                             style={{
                               background: 'transparent',
                               border: 'none',
@@ -1874,7 +1845,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         <MeetingPreviewModal
           event={previewEvent}
           notes={notes}
-          onOpenNote={handleNoteClick}
+          onOpenNote={handleOpenNotePreview}
           onClose={() => setPreviewEvent(null)}
         />
       )}
@@ -2442,21 +2413,6 @@ const emptyStateStyle: React.CSSProperties = {
   color: 'var(--text-muted)',
 };
 
-const jumpPillStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '5px 12px',
-  borderRadius: '14px',
-  fontSize: '12px',
-  fontWeight: 600,
-  cursor: 'pointer',
-  border: '1px solid var(--border-subtle)',
-  backgroundColor: 'var(--bg-card-app)',
-  color: 'var(--text-secondary)',
-  whiteSpace: 'nowrap',
-  transition: 'all 0.15s ease',
-};
 
 // ── Note Preview Modal Component ──────────────────────────
 interface NotePreviewModalProps {

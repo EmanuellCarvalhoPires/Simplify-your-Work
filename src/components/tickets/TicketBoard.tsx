@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { Ticket, JiraInstance, TicketStatus, NoteItem, SavedJqlQuery, UserProfile } from '../../types/index';
+import type { Ticket, JiraInstance, TicketStatus, NoteItem, SavedJqlQuery, UserProfile, JiraComment } from '../../types/index';
 import { TicketColumn } from './TicketColumn';
 import { AddJiraModal } from './AddJiraModal';
 import { AddLocalTicketModal } from './AddLocalTicketModal';
@@ -10,26 +10,19 @@ import {
   AlertTriangle,
   X,
   Filter,
-  Globe,
   LayoutGrid,
   Table as TableIcon,
-  User,
   Plus,
   RotateCcw,
   ArrowUp,
   ArrowDown,
   Terminal,
-  Search,
   Bookmark,
   Save,
   Trash2,
-  HelpCircle,
   Sparkles,
   RefreshCw,
-  FolderOpen,
   Check,
-  CheckSquare,
-  Square,
   Layers,
   ChevronDown,
 } from 'lucide-react';
@@ -408,7 +401,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     return 0;
   });
 
-  const handleSort = (field: SortField, e?: React.MouseEvent) => {
+  const handleSort = (field: SortField, _e?: React.MouseEvent) => {
     setSortRules((prevRules) => {
       const existingIndex = prevRules.findIndex((r) => r.field === field);
 

@@ -12,22 +12,19 @@ import {
   Sparkles,
   ChevronDown,
   Folder,
-  Globe,
-  Cloud,
-  Code,
-  Layout,
   ExternalLink,
-  Zap,
-  CheckSquare,
-  Layers,
-  Shield,
-  Radio,
+  Edit3,
+  Trash2,
+  Copy,
+  Plus,
+  PlusCircle,
 } from 'lucide-react';
 import type {
   AiAssistantConfig,
   NavTab,
   SidebarConfig,
   SidebarEntry,
+  SidebarGroupEntry,
   CustomSite,
 } from '../../types/index';
 
@@ -65,7 +62,7 @@ export const getNavItemDef = (tabId: NavTab, customSites?: CustomSite[]): NavIte
   if (ALL_NAV_ITEMS[tabId]) {
     return ALL_NAV_ITEMS[tabId];
   }
-  const sites = customSites && customSites.length > 0 ? customSites : loadStoredCustomSites();
+  const sites = customSites !== undefined ? customSites : loadStoredCustomSites();
   const custom = sites.find((s) => s && s.id === tabId);
   if (custom) {
     const CustomIconComp: React.FC<{ size?: number | string; color?: string; className?: string }> = ({ size, color, className }) => (
@@ -97,9 +94,9 @@ export const DEFAULT_CUSTOM_SITES: CustomSite[] = [
 export const loadStoredCustomSites = (): CustomSite[] => {
   try {
     const saved = localStorage.getItem('simplify_custom_sites');
-    if (saved) {
+    if (saved !== null) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
     console.error('Erro ao ler simplify_custom_sites:', e);
@@ -138,23 +135,55 @@ export const normalizeSidebarConfig = (
     ? JSON.parse(JSON.stringify(rawConfig.entries))
     : JSON.parse(JSON.stringify(DEFAULT_SIDEBAR_CONFIG.entries));
 
-  // 1. Encontra ou assegura grupo Microsoft
-  let groupMs = safeEntries.find(
+  const validSiteIds = new Set((customSites || []).map((s) => s && s.id).filter(Boolean));
+
+  // 1. Limpar IDs de sites customizados que foram deletados (não constam em customSites)
+  const cleanedEntries: SidebarEntry[] = [];
+  safeEntries.forEach((entry) => {
+    if (!entry) return;
+    if (entry.type === 'item') {
+      if (entry.id && String(entry.id).startsWith('site_')) {
+        if (validSiteIds.has(entry.id)) {
+          cleanedEntries.push(entry);
+        }
+      } else {
+        cleanedEntries.push(entry);
+      }
+    } else if (entry.type === 'group') {
+      const filteredItemIds = (entry.itemIds || []).filter((id) => {
+        if (id && String(id).startsWith('site_')) {
+          return validSiteIds.has(id);
+        }
+        return true;
+      });
+      cleanedEntries.push({
+        ...entry,
+        itemIds: filteredItemIds,
+      });
+    }
+  });
+
+  // 2. Assegura grupo Microsoft
+  let groupMs = cleanedEntries.find(
     (e) => e.type === 'group' && (e.id === 'group_microsoft' || e.title?.toLowerCase().includes('microsoft'))
   ) as SidebarGroupEntry | undefined;
 
   if (!groupMs) {
+    const defaultMsItems: NavTab[] = ['outlook', 'teams'];
+    if (validSiteIds.has('site_onedrive')) {
+      defaultMsItems.push('site_onedrive');
+    }
     groupMs = {
       type: 'group',
       id: 'group_microsoft',
       title: 'MICROSOFT',
-      itemIds: ['outlook', 'teams', 'site_onedrive'],
+      itemIds: defaultMsItems,
     };
-    safeEntries.unshift(groupMs);
+    cleanedEntries.unshift(groupMs);
   }
 
-  // 2. Encontra ou assegura grupo Agentes de IA
-  let groupAi = safeEntries.find(
+  // 3. Assegura grupo Agentes de IA
+  let groupAi = cleanedEntries.find(
     (e) => e.type === 'group' && (e.id === 'group_ai' || e.title?.toLowerCase().includes('ia') || e.title?.toLowerCase().includes('ai'))
   ) as SidebarGroupEntry | undefined;
 
@@ -165,13 +194,13 @@ export const normalizeSidebarConfig = (
       title: 'AGENTES DE IA',
       itemIds: ['ai_gemini', 'ai_claude', 'ai_chatgpt'],
     };
-    const msIdx = safeEntries.indexOf(groupMs);
-    safeEntries.splice(msIdx + 1, 0, groupAi);
+    const msIdx = cleanedEntries.indexOf(groupMs);
+    cleanedEntries.splice(msIdx + 1, 0, groupAi);
   }
 
   // Conjunto de todos os IDs já presentes
   const existingIds = new Set<string>();
-  safeEntries.forEach((entry) => {
+  cleanedEntries.forEach((entry) => {
     if (entry.type === 'item' && entry.id) {
       existingIds.add(entry.id);
     } else if (entry.type === 'group' && Array.isArray(entry.itemIds)) {
@@ -181,14 +210,20 @@ export const normalizeSidebarConfig = (
     }
   });
 
-  // Se site_onedrive não estiver presente em lugar nenhum, adiciona no grupo Microsoft
-  if (!existingIds.has('site_onedrive')) {
-    if (!groupMs.itemIds) groupMs.itemIds = [];
-    groupMs.itemIds.push('site_onedrive');
-    existingIds.add('site_onedrive');
-  }
+  // 4. Adiciona sites customizados válidos que não estejam ainda na hierarquia
+  (customSites || []).forEach((site) => {
+    if (site && site.id && !existingIds.has(site.id)) {
+      if (site.id === 'site_onedrive' && groupMs) {
+        if (!groupMs.itemIds) groupMs.itemIds = [];
+        groupMs.itemIds.push('site_onedrive');
+      } else {
+        cleanedEntries.push({ type: 'item', id: site.id as NavTab });
+      }
+      existingIds.add(site.id);
+    }
+  });
 
-  // Se qualquer provedor de IA habilitado (ex: Claude, Gemini, ChatGPT) não estiver presente, adiciona no grupo Agentes de IA
+  // 5. Adiciona provedores de IA habilitados
   const enabledAi = aiConfig?.enabledProviders || ['gemini'];
   enabledAi.forEach((prov) => {
     const aiTabId = `ai_${prov}` as NavTab;
@@ -199,16 +234,16 @@ export const normalizeSidebarConfig = (
     }
   });
 
-  // Garante que os módulos principais existam
+  // 6. Garante que os módulos principais existam
   const baseItems: NavTab[] = ['calendar', 'notes', 'clients', 'reminders', 'tickets'];
   baseItems.forEach((tabId) => {
     if (!existingIds.has(tabId)) {
-      safeEntries.push({ type: 'item', id: tabId });
+      cleanedEntries.push({ type: 'item', id: tabId });
       existingIds.add(tabId);
     }
   });
 
-  return { entries: safeEntries };
+  return { entries: cleanedEntries };
 };
 
 export const loadStoredSidebarConfig = (customSites?: CustomSite[], aiConfig?: AiAssistantConfig): SidebarConfig => {
@@ -241,12 +276,15 @@ export const loadStoredSidebarConfig = (customSites?: CustomSite[], aiConfig?: A
   return normalizeSidebarConfig(DEFAULT_SIDEBAR_CONFIG, customSites, aiConfig);
 };
 
-interface SidebarProps {
+export interface SidebarProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   aiConfig?: AiAssistantConfig;
   sidebarConfig?: SidebarConfig;
   customSites?: CustomSite[];
+  onOpenCreateSiteModal?: (targetGroupId?: string) => void;
+  onOpenEditSiteModal?: (site: CustomSite) => void;
+  onDeleteCustomSite?: (siteId: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -255,12 +293,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   aiConfig,
   sidebarConfig: propSidebarConfig,
   customSites: propCustomSites,
+  onOpenCreateSiteModal,
+  onOpenEditSiteModal,
+  onDeleteCustomSite,
 }) => {
-  const customSites = propCustomSites && propCustomSites.length > 0 ? propCustomSites : loadStoredCustomSites();
+  const customSites = propCustomSites !== undefined ? propCustomSites : loadStoredCustomSites();
   const [currentConfig, setCurrentConfig] = useState<SidebarConfig>(() => {
     const raw = propSidebarConfig || loadStoredSidebarConfig(customSites, aiConfig);
     return normalizeSidebarConfig(raw, customSites, aiConfig);
   });
+
+  // Estado do Menu de Contexto (botão direito)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'site' | 'group' | 'empty';
+    site?: CustomSite;
+    groupId?: string;
+    groupTitle?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (propSidebarConfig) {
@@ -277,7 +328,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         try {
           const parsed = JSON.parse(e.newValue);
           if (parsed && Array.isArray(parsed.entries)) {
-            setCurrentConfig(parsed);
+            setCurrentConfig(normalizeSidebarConfig(parsed, customSites, aiConfig));
           }
         } catch (err) {
           console.error(err);
@@ -286,6 +337,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
+  }, [customSites, aiConfig]);
+
+  // Fecha menu de contexto em cliques globais ou scrolls
+  useEffect(() => {
+    const handleGlobalClick = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', handleGlobalClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const enabledAi = aiConfig?.enabledProviders || [];
@@ -309,6 +374,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     const Icon = item.icon || LayoutDashboard;
     const isActive = activeTab === tabId;
+    const customSiteObj = customSites.find((s) => s && s.id === tabId);
+
+    const handleContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (customSiteObj) {
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          type: 'site',
+          site: customSiteObj,
+        });
+      } else {
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          type: 'empty',
+        });
+      }
+    };
 
     return (
       <div key={tabId} style={{ position: 'relative', width: '100%' }}>
@@ -330,12 +415,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
         <button
           onClick={() => onSelectTab(tabId)}
+          onContextMenu={handleContextMenu}
           style={{
             ...styles.navButton,
             ...(isGroupChild ? styles.groupChildButton : {}),
             ...(isActive ? styles.activeNavButton : {}),
           }}
-          title={item.label}
+          title={customSiteObj ? `${item.label} (${customSiteObj.url}) - Clique direito para opções` : item.label}
         >
           {isActive && (
             <div
@@ -406,8 +492,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
     (id) => id && id !== 'settings' && isTabAvailable(id) && !renderedItemIds.has(id)
   );
 
+  const handleContainerContextMenu = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      e.preventDefault();
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        type: 'empty',
+      });
+    }
+  };
+
   return (
-    <aside style={styles.sidebar}>
+    <aside
+      style={styles.sidebar}
+      onContextMenu={handleContainerContextMenu}
+    >
       {/* Sidebar Top Title Pill */}
       <div style={styles.headerBox}>
         <span style={styles.headerTitle}>Painel</span>
@@ -429,10 +529,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <div key={entry.id || Math.random().toString()} style={styles.groupContainer}>
                 {/* Cabeçalho do Tópico (Sempre visível/não colapsável) */}
-                <div style={styles.groupHeader} title={`Tópico: ${entry.title}`}>
-                  <ChevronDown size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                  <Folder size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
-                  <span style={styles.groupTitleText}>{entry.title}</span>
+                <div
+                  style={styles.groupHeader}
+                  title={`Tópico: ${entry.title} - Clique com botão direito para opções`}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      type: 'group',
+                      groupId: entry.id,
+                      groupTitle: entry.title,
+                    });
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                    <ChevronDown size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                    <Folder size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                    <span style={styles.groupTitleText}>{entry.title}</span>
+                  </div>
+
+                  {/* Atalho rápido para adicionar site no tópico */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenCreateSiteModal) {
+                        onOpenCreateSiteModal(entry.id);
+                      } else {
+                        onSelectTab('settings');
+                      }
+                    }}
+                    style={styles.topicAddBtn}
+                    title={`Adicionar site diretamente no tópico "${entry.title}"`}
+                  >
+                    <Plus size={11} />
+                  </button>
                 </div>
 
                 {/* Sub-itens do Tópico */}
@@ -448,6 +581,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Renderiza itens habilitados que eventualmente faltaram na configuração */}
         {missingAvailableItems.map((missingId) => renderNavButton(missingId, false))}
+
+        {/* Botão de Ação Rápida: + Adicionar Site Web */}
+        <div style={{ marginTop: '10px', padding: '0 4px' }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenCreateSiteModal) {
+                onOpenCreateSiteModal('root');
+              } else {
+                onSelectTab('settings');
+              }
+            }}
+            style={styles.quickAddSiteButton}
+            title="Adicionar um novo site ou aplicativo web na barra lateral"
+          >
+            <PlusCircle size={14} color="#38bdf8" />
+            <span>Adicionar Site</span>
+          </button>
+        </div>
       </nav>
 
       {/* Footer Settings Link */}
@@ -477,6 +629,168 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span style={{ fontSize: '13px' }}>Configurações</span>
         </button>
       </div>
+
+      {/* Menu de Contexto (Botão Direito) */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: Math.min(contextMenu.y, window.innerHeight - 220),
+            left: Math.min(contextMenu.x, window.innerWidth - 220),
+            backgroundColor: 'var(--bg-card-jira, #1e293b)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '10px',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+            zIndex: 10000,
+            padding: '6px',
+            minWidth: '190px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.type === 'site' && contextMenu.site && (
+            <>
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                  {contextMenu.site.title}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenEditSiteModal && contextMenu.site) {
+                    onOpenEditSiteModal(contextMenu.site);
+                  } else {
+                    onSelectTab('settings');
+                  }
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <Edit3 size={13} color="#38bdf8" />
+                <span>Editar Site</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (contextMenu.site?.url) {
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(contextMenu.site.url);
+                    } else {
+                      window.open(contextMenu.site.url, '_blank');
+                    }
+                  }
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <ExternalLink size={13} color="#a5b4fc" />
+                <span>Abrir no Navegador</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (contextMenu.site?.url) {
+                    navigator.clipboard.writeText(contextMenu.site.url);
+                  }
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <Copy size={13} color="#34d399" />
+                <span>Copiar Link</span>
+              </button>
+              <div style={{ height: '1px', backgroundColor: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteCustomSite && contextMenu.site) {
+                    if (window.confirm(`Deseja realmente excluir o site "${contextMenu.site.title}"?`)) {
+                      onDeleteCustomSite(contextMenu.site.id);
+                    }
+                  } else {
+                    onSelectTab('settings');
+                  }
+                  setContextMenu(null);
+                }}
+                style={{ ...styles.contextMenuItem, color: '#fb7185' }}
+              >
+                <Trash2 size={13} color="#fb7185" />
+                <span>Excluir Site</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === 'group' && (
+            <>
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                  {contextMenu.groupTitle || 'Tópico'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenCreateSiteModal) {
+                    onOpenCreateSiteModal(contextMenu.groupId);
+                  } else {
+                    onSelectTab('settings');
+                  }
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <PlusCircle size={13} color="#38bdf8" />
+                <span>+ Add Site neste Tópico</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectTab('settings');
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <Settings size={13} color="#a5b4fc" />
+                <span>Gerenciar Tópicos</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === 'empty' && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenCreateSiteModal) {
+                    onOpenCreateSiteModal('root');
+                  } else {
+                    onSelectTab('settings');
+                  }
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <PlusCircle size={13} color="#38bdf8" />
+                <span>+ Adicionar Site Web</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectTab('settings');
+                  setContextMenu(null);
+                }}
+                style={styles.contextMenuItem}
+              >
+                <Settings size={13} color="#a5b4fc" />
+                <span>Configurações da Barra</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </aside>
   );
 };
@@ -525,9 +839,12 @@ const styles: Record<string, React.CSSProperties> = {
   groupHeader: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: '6px',
-    padding: '5px 8px 3px 6px',
+    padding: '5px 6px 3px 6px',
     userSelect: 'none',
+    borderRadius: '6px',
+    transition: 'background-color 0.15s ease',
   },
   groupTitleText: {
     fontSize: '11.5px',
@@ -539,6 +856,19 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: 'nowrap',
     textTransform: 'uppercase',
     opacity: 0.85,
+  },
+  topicAddBtn: {
+    background: 'none',
+    border: 'none',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    padding: '2px 4px',
+    borderRadius: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.7,
+    transition: 'all 0.15s ease',
   },
   groupItemsContainer: {
     display: 'flex',
@@ -579,9 +909,40 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '700',
     boxShadow: '0 2px 10px rgba(99, 102, 241, 0.3)',
   },
+  quickAddSiteButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    width: '100%',
+    padding: '6px 10px',
+    borderRadius: '6px',
+    border: '1px dashed rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    color: 'var(--text-secondary)',
+    fontSize: '11.5px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
   footer: {
     borderTop: '1px solid var(--border-subtle)',
     paddingTop: '10px',
     marginTop: 'auto',
+  },
+  contextMenuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '7px 10px',
+    borderRadius: '6px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: 'var(--text-primary)',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    width: '100%',
+    textAlign: 'left',
+    transition: 'background-color 0.12s ease',
   },
 };

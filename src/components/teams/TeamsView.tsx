@@ -224,7 +224,9 @@ export const TeamsView: React.FC = () => {
           ref={webviewRef}
           src={TEAMS_URL}
           partition="persist:teams"
-          allowpopups="true"
+          allowpopups={true}
+          useragent={CHROME_UA}
+          webpreferences="contextIsolation=yes, javascript=yes, webgl=yes, experimentalFeatures=yes"
           style={{
             width: '100%',
             height: '100%',

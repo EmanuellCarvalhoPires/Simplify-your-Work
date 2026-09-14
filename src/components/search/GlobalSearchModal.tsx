@@ -4,18 +4,11 @@ import {
   X,
   LayoutDashboard,
   FileText,
-  FileCode,
   Paperclip,
   Calendar,
   Briefcase,
   Bell,
-  ArrowRight,
-  Clock,
-  CheckCircle2,
-  ExternalLink,
   ChevronRight,
-  Sparkles,
-  Layers,
 } from 'lucide-react';
 import type {
   Ticket,

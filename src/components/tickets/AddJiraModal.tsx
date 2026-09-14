@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { JiraInstance, Ticket, SavedJqlQuery } from '../../types/index';
+import type { JiraInstance, Ticket, SavedJqlQuery, UserProfile } from '../../types/index';
 import {
   Search,
   AlertCircle,
@@ -163,7 +163,7 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
             return;
           } else {
             let successText = '';
-            if (res.newCount > 0 && res.updatedCount > 0) {
+            if (res.newCount > 0 && (res.updatedCount || 0) > 0) {
               successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) e ${res.updatedCount} existente(s) atualizado(s) e vinculado(s) à instância!`;
             } else if (res.newCount > 0) {
               successText = `✨ ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;
@@ -197,7 +197,7 @@ export const AddJiraModal: React.FC<AddJiraModalProps> = ({
             return;
           } else {
             let successText = '';
-            if (res.newCount > 0 && res.updatedCount > 0) {
+            if (res.newCount > 0 && (res.updatedCount || 0) > 0) {
               successText = `✨ Filtro Jira sincronizado! ${res.newCount} novo(s) ticket(s) importado(s) e ${res.updatedCount} existente(s) atualizado(s) e vinculado(s) à instância!`;
             } else if (res.newCount > 0) {
               successText = `✨ Filtro Jira importado! ${res.newCount} novo(s) ticket(s) importado(s) com sucesso!`;

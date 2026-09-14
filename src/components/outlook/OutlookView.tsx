@@ -223,7 +223,9 @@ export const OutlookView: React.FC = () => {
           ref={webviewRef}
           src={OUTLOOK_URL}
           partition="persist:outlook"
-          allowpopups="true"
+          allowpopups={true}
+          useragent={CHROME_UA}
+          webpreferences="contextIsolation=yes, javascript=yes, webgl=yes, experimentalFeatures=yes"
           style={{
             width: '100%',
             height: '100%',

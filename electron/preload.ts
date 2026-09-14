@@ -98,6 +98,8 @@ const api = {
     ipcRenderer.invoke('notes:saveFileNote', fileData),
   updateNoteMeta: (note: Partial<NoteItem> & { id: string }): Promise<NoteItem> =>
     ipcRenderer.invoke('notes:updateMeta', note),
+  saveNoteMeta: (note: Partial<NoteItem> & { id: string }): Promise<NoteItem> =>
+    ipcRenderer.invoke('notes:updateMeta', note),
   deleteNote: (id: string): Promise<boolean> => ipcRenderer.invoke('notes:delete', id),
   exportNoteAsTxt: (content: string, defaultFileName: string): Promise<boolean> =>
     ipcRenderer.invoke('notes:exportTxt', { content, defaultFileName }),
@@ -158,6 +160,11 @@ const api = {
   getLegalDocs: (): Promise<{ termsContent: string; privacyContent: string }> => ipcRenderer.invoke('system:getLegalDocs'),
   openGoogleAuthWindow: (provider: string, serviceUrl?: string): Promise<{ success: boolean; url?: string; closedByUser?: boolean }> =>
     ipcRenderer.invoke('system:openGoogleAuthWindow', { provider, serviceUrl }),
+
+  // Spellchecker / Correção Ortográfica
+  getSpellCheckerLanguages: (): Promise<string[]> => ipcRenderer.invoke('spellcheck:getLanguages'),
+  setSpellCheckerLanguages: (languages: string[]): Promise<boolean> => ipcRenderer.invoke('spellcheck:setLanguages', languages),
+  addWordToDictionary: (word: string): Promise<boolean> => ipcRenderer.invoke('spellcheck:addWord', word),
 };
 
 try {

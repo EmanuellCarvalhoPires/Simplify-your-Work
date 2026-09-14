@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, ChevronDown, UserPlus, Check, Trash2, Search, Command } from 'lucide-react';
+import { User, ChevronDown, UserPlus, Check, Trash2, Search } from 'lucide-react';
 import type { UserProfile } from '../../types/index';
 
 interface HeaderProps {
@@ -15,8 +15,8 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  searchQuery = '',
-  onSearchChange,
+  searchQuery: _searchQuery = '',
+  onSearchChange: _onSearchChange,
   onOpenGlobalSearch,
   presetName,
   activeUser,

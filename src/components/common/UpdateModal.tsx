@@ -1,5 +1,4 @@
-import React from 'react';
-import { Sparkles, Download, RefreshCw, Zap, X, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Sparkles, Download, RefreshCw, Zap, X, CheckCircle2 } from 'lucide-react';
 
 interface UpdateModalProps {
   isOpen: boolean;

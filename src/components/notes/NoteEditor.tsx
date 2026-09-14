@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import type { NoteItem, NoteFolder, ClientAsset } from '../../types/index';
 import { RichTextEditor } from './RichTextEditor';
 import { FileViewerModal } from '../common/FileViewerModal';
@@ -21,7 +22,6 @@ import {
   ChevronDown,
   ChevronRight,
   FolderCheck,
-  FolderRoot,
   MoreVertical,
   HardDrive,
   Edit2,
@@ -33,7 +33,6 @@ import {
   FileCode,
   Check,
   Briefcase,
-  Building2,
   Link2,
   Search,
   ExternalLink,
@@ -41,7 +40,6 @@ import {
   ArrowUp,
   ArrowDown,
   SlidersHorizontal,
-  Eye,
   EyeOff,
 } from 'lucide-react';
 
@@ -51,7 +49,7 @@ class NoteErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean; error: Error | null }
 > {
-  public state = { hasError: false, error: null };
+  public state: { hasError: boolean; error: Error | null } = { hasError: false, error: null };
 
   public static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
@@ -107,6 +105,47 @@ class NoteErrorBoundary extends Component<
   }
 }
 
+// ─── Session Storage Keys & Helpers ──────────────────────────────────────────
+
+const NOTES_EXPANDED_FOLDERS_KEY = 'simplify_notes_expanded_folders';
+const NOTES_ACTIVE_NOTE_ID_KEY = 'simplify_notes_active_id';
+
+const getInitialExpandedFolders = (): Record<string, boolean> => {
+  try {
+    const raw = sessionStorage.getItem(NOTES_EXPANDED_FOLDERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao ler pastas expandidas do sessionStorage:', err);
+  }
+  return {};
+};
+
+const getFolderAncestorsAndClient = (
+  folderId: string | undefined,
+  allFolders: NoteFolder[]
+): { folderIds: string[]; clientId?: string } => {
+  const folderIds: string[] = [];
+  let currentId: string | undefined = folderId;
+  let clientId: string | undefined = undefined;
+
+  while (currentId) {
+    folderIds.push(currentId);
+    const folderObj = allFolders.find((f) => f.id === currentId);
+    if (!folderObj) break;
+    if (folderObj.clientId && !clientId) {
+      clientId = folderObj.clientId;
+    }
+    currentId = folderObj.parentId;
+  }
+
+  return { folderIds, clientId };
+};
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface NoteEditorProps {
@@ -146,7 +185,7 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   onSaveContent,
   onDeleteNote,
   onExportTxt,
-  onReorderNotes,
+  onReorderNotes: _onReorderNotes,
   onReorderFolders,
   onSaveFolder,
   onDeleteFolder,
@@ -154,11 +193,22 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   onSaveClient,
   onNavigateToClient,
 }) => {
-  const [activeNote, setActiveNote] = useState<NoteItem | null>(notes.length > 0 ? notes[0] : null);
+  const [activeNote, setActiveNote] = useState<NoteItem | null>(() => {
+    if (notes.length === 0) return null;
+    try {
+      const savedActiveId = sessionStorage.getItem(NOTES_ACTIVE_NOTE_ID_KEY);
+      if (savedActiveId) {
+        const found = notes.find((n) => n.id === savedActiveId);
+        if (found) return found;
+      }
+    } catch (err) {
+      console.error('Erro ao ler activeNote do sessionStorage:', err);
+    }
+    return notes[0];
+  });
   const [content, setContent] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [saveStatus, setSaveStatus] = useState('Salvo');
-  const [isExporting, setIsExporting] = useState(false);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const draggedFolderIdRef = useRef<string | null>(null);
@@ -237,10 +287,10 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   // Context Menu State (3-Dots dropdown)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Sidebar & Folder State (Pastas fechadas por padrão)
+  // Sidebar & Folder State (Pastas mantidas abertas até fechamento manual ou reinício do app)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>(getInitialExpandedFolders);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [noteToExport, setNoteToExport] = useState<NoteItem | null>(null);
 
@@ -296,54 +346,192 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
 
-  // Guards against cross-note state contamination during async loading & auto-saving
+  // ─── Session State & Guards against cross-note state contamination ──────────
+  interface NoteSession {
+    noteId: string;
+    filePath: string;
+    title: string;
+    content: string;
+    isDirty: boolean;
+    isFile: boolean;
+  }
+
+  const [loadedNoteId, setLoadedNoteId] = useState<string | null>(null);
+  const [isLoadingContent, setIsLoadingContent] = useState<boolean>(false);
+
   const isLoadedRef = useRef<boolean>(false);
-  const isDirtyRef = useRef<boolean>(false);
   const activeNoteRef = useRef<NoteItem | null>(null);
-  const contentRef = useRef<string>(content);
-  const noteTitleRef = useRef<string>(noteTitle);
+  const currentSessionRef = useRef<NoteSession | null>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  contentRef.current = content;
-  noteTitleRef.current = noteTitle;
   activeNoteRef.current = activeNote;
+  isLoadedRef.current = Boolean(loadedNoteId && activeNote && loadedNoteId === activeNote.id);
 
-  const flushSave = async () => {
-    if (!isDirtyRef.current || !activeNoteRef.current || isFileNote(activeNoteRef.current)) return;
-    try {
-      const noteToSave = activeNoteRef.current;
-      const titleToSave = noteTitleRef.current;
-      const contentToSave = contentRef.current;
-      isDirtyRef.current = false;
-      await onSaveContent(noteToSave.filePath, titleToSave, contentToSave);
-      setSaveStatus('Salvo');
-    } catch (err) {
-      console.error('[NoteEditor flushSave error]:', err);
+  // Atomic flush of a specific session - strictly isolated to its own filePath
+  const flushSession = async (sessionToFlush = currentSessionRef.current) => {
+    if (!sessionToFlush || !sessionToFlush.isDirty) return;
+    if (sessionToFlush.isFile) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
     }
+
+    const { filePath, title, content: contentToSave, noteId } = sessionToFlush;
+    // Mark as clean immediately to prevent re-entrant flush
+    sessionToFlush.isDirty = false;
+
+    try {
+      await onSaveContent(filePath, title, contentToSave);
+      if (currentSessionRef.current?.noteId === noteId) {
+        setSaveStatus('Salvo');
+      }
+    } catch (err) {
+      console.error('[NoteEditor flushSession error]:', err);
+      if (currentSessionRef.current?.noteId === noteId) {
+        currentSessionRef.current.isDirty = true;
+        setSaveStatus('Erro ao salvar');
+      }
+    }
+  };
+
+  const flushSave = () => flushSession(currentSessionRef.current);
+
+  const handleUserContentChange = (newHtml: string) => {
+    if (!activeNote || isFileNote(activeNote)) return;
+    if (loadedNoteId !== activeNote.id || !currentSessionRef.current) return;
+    if (currentSessionRef.current.noteId !== activeNote.id) return;
+
+    setContent(newHtml);
+
+    if (newHtml === currentSessionRef.current.content) return;
+
+    currentSessionRef.current.content = newHtml;
+    currentSessionRef.current.isDirty = true;
+    setSaveStatus('Salvando...');
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    const sessionAtSchedule = currentSessionRef.current;
+    saveTimerRef.current = setTimeout(async () => {
+      if (!sessionAtSchedule || !sessionAtSchedule.isDirty) return;
+      sessionAtSchedule.isDirty = false;
+      try {
+        await onSaveContent(sessionAtSchedule.filePath, sessionAtSchedule.title, sessionAtSchedule.content);
+        if (currentSessionRef.current?.noteId === sessionAtSchedule.noteId) {
+          setSaveStatus('Salvo');
+        }
+      } catch (err) {
+        console.error('[NoteEditor auto-save error]:', err);
+        if (currentSessionRef.current?.noteId === sessionAtSchedule.noteId) {
+          sessionAtSchedule.isDirty = true;
+          setSaveStatus('Erro ao salvar');
+        }
+      }
+    }, 400);
+  };
+
+  const handleUserTitleChange = (newTitle: string) => {
+    setNoteTitle(newTitle);
+    if (!activeNote || isFileNote(activeNote)) return;
+    if (loadedNoteId !== activeNote.id || !currentSessionRef.current) return;
+    if (currentSessionRef.current.noteId !== activeNote.id) return;
+
+    if (newTitle === currentSessionRef.current.title) return;
+
+    currentSessionRef.current.title = newTitle;
+    currentSessionRef.current.isDirty = true;
+    setSaveStatus('Salvando...');
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    const sessionAtSchedule = currentSessionRef.current;
+    saveTimerRef.current = setTimeout(async () => {
+      if (!sessionAtSchedule || !sessionAtSchedule.isDirty) return;
+      sessionAtSchedule.isDirty = false;
+      try {
+        await onSaveContent(sessionAtSchedule.filePath, sessionAtSchedule.title, sessionAtSchedule.content);
+        if (currentSessionRef.current?.noteId === sessionAtSchedule.noteId) {
+          setSaveStatus('Salvo');
+        }
+      } catch (err) {
+        console.error('[NoteEditor auto-save title error]:', err);
+        if (currentSessionRef.current?.noteId === sessionAtSchedule.noteId) {
+          sessionAtSchedule.isDirty = true;
+          setSaveStatus('Erro ao salvar');
+        }
+      }
+    }, 400);
   };
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      flushSave();
+      if (currentSessionRef.current && currentSessionRef.current.isDirty) {
+        flushSession(currentSessionRef.current);
+      }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
+
+  // Sync expandedFolders with sessionStorage to persist open folders across tabs in session
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(NOTES_EXPANDED_FOLDERS_KEY, JSON.stringify(expandedFolders));
+    } catch (err) {
+      console.error('Erro ao salvar pastas expandidas no sessionStorage:', err);
+    }
+  }, [expandedFolders]);
+
+  // Sync activeNote id with sessionStorage
+  useEffect(() => {
+    if (activeNote?.id) {
+      try {
+        sessionStorage.setItem(NOTES_ACTIVE_NOTE_ID_KEY, activeNote.id);
+      } catch (err) {
+        console.error('Erro ao salvar activeNote no sessionStorage:', err);
+      }
+    }
+  }, [activeNote?.id]);
 
   useEffect(() => {
     if (targetNoteId) {
       const found = notes.find((n) => n.id === targetNoteId);
       if (found) {
         setActiveNote(found);
-        if (found.folderId && !expandedFolders.includes(found.folderId)) {
-          setExpandedFolders((prev) => [...prev, found.folderId!]);
+        const toExpand: Record<string, boolean> = {};
+
+        if (found.folderId) {
+          const { folderIds, clientId } = getFolderAncestorsAndClient(found.folderId, folders);
+          folderIds.forEach((id) => {
+            toExpand[id] = true;
+          });
+          if (clientId) {
+            toExpand[`client_${clientId}`] = true;
+          }
         }
+
+        if (found.clientId) {
+          toExpand[`client_${found.clientId}`] = true;
+        }
+
+        if (Object.keys(toExpand).length > 0) {
+          setExpandedFolders((prev) => ({ ...prev, ...toExpand }));
+        }
+
         if (onClearTargetNote) onClearTargetNote();
         return;
       }
     }
 
     if (notes.length > 0 && !activeNote) {
-      setActiveNote(notes[0]);
+      const savedActiveId = sessionStorage.getItem(NOTES_ACTIVE_NOTE_ID_KEY);
+      const foundSaved = savedActiveId ? notes.find((n) => n.id === savedActiveId) : null;
+      setActiveNote(foundSaved || notes[0]);
     } else if (activeNote) {
       // Sync active note reference if it was updated in parent state
       const found = notes.find((n) => n.id === activeNote.id);
@@ -351,41 +539,73 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
         setActiveNote(found);
       }
     }
-  }, [targetNoteId, notes]);
+  }, [targetNoteId, notes, folders]);
 
-  // Load content when active note changes (with cancellation check and pending flush)
+  // Load content when active note changes (with atomic session flush and cross-contamination guard)
   useEffect(() => {
     let isCancelled = false;
+    const targetNote = activeNote;
 
-    // Flush any pending unsaved content from the previous note before switching
-    flushSave();
+    // Flush any pending unsaved content strictly to the previous session's file
+    if (currentSessionRef.current && currentSessionRef.current.isDirty) {
+      flushSession(currentSessionRef.current);
+    }
+    // Cancel any pending debounced auto-save timer
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
 
-    if (activeNote) {
-      setNoteTitle(activeNote.title);
+    if (targetNote) {
+      setNoteTitle(targetNote.title);
 
-      if (isFileNote(activeNote)) {
-        isLoadedRef.current = false;
-        isDirtyRef.current = false;
+      if (isFileNote(targetNote)) {
+        currentSessionRef.current = null;
+        setLoadedNoteId(targetNote.id);
+        setIsLoadingContent(false);
         setContent('');
         setSaveStatus('Salvo');
         return;
       }
 
-      isLoadedRef.current = false;
-      isDirtyRef.current = false;
+      // Reset content and enter loading state to prevent flash or premature editing
+      setLoadedNoteId(null);
+      setIsLoadingContent(true);
+      setContent('');
       setSaveStatus('Carregando...');
 
-      onReadContent(activeNote.filePath).then((text) => {
-        if (!isCancelled && activeNoteRef.current?.id === activeNote.id) {
-          setContent(text || '');
-          setSaveStatus('Salvo');
-          isLoadedRef.current = true;
-          isDirtyRef.current = false;
+      onReadContent(targetNote.filePath).then((text) => {
+        // Discard if canceled or user already switched to another note in the meantime
+        if (isCancelled || activeNoteRef.current?.id !== targetNote.id) {
+          return;
+        }
+
+        const initialText = text || '';
+        setContent(initialText);
+        setNoteTitle(targetNote.title);
+        setSaveStatus('Salvo');
+        setIsLoadingContent(false);
+        setLoadedNoteId(targetNote.id);
+
+        currentSessionRef.current = {
+          noteId: targetNote.id,
+          filePath: targetNote.filePath,
+          title: targetNote.title,
+          content: initialText,
+          isDirty: false,
+          isFile: false,
+        };
+      }).catch((err) => {
+        if (!isCancelled && activeNoteRef.current?.id === targetNote.id) {
+          console.error('[NoteEditor] Erro ao carregar conteúdo da nota:', err);
+          setIsLoadingContent(false);
+          setSaveStatus('Erro ao carregar');
         }
       });
     } else {
-      isLoadedRef.current = false;
-      isDirtyRef.current = false;
+      currentSessionRef.current = null;
+      setLoadedNoteId(null);
+      setIsLoadingContent(false);
       setContent('');
       setNoteTitle('');
       setSaveStatus('Salvo');
@@ -393,39 +613,13 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
 
     return () => {
       isCancelled = true;
-      flushSave();
+      if (currentSessionRef.current && currentSessionRef.current.isDirty) {
+        flushSession(currentSessionRef.current);
+      }
     };
   }, [activeNote?.id, activeNote?.filePath]);
 
-  // Auto-save debounce (runs ONLY for text notes when isLoadedRef.current is true)
-  useEffect(() => {
-    if (!activeNote || !isLoadedRef.current || isFileNote(activeNote)) return;
-
-    isDirtyRef.current = true;
-    setSaveStatus('Salvando...');
-    const currentNoteId = activeNote.id;
-    const currentFilePath = activeNote.filePath;
-    const currentTitle = noteTitle;
-    const currentContent = content;
-
-    const timer = setTimeout(async () => {
-      try {
-        if (activeNoteRef.current?.id !== currentNoteId) return;
-
-        await onSaveContent(currentFilePath, currentTitle, currentContent);
-        if (activeNoteRef.current?.id === currentNoteId) {
-          isDirtyRef.current = false;
-          setSaveStatus('Salvo');
-        }
-      } catch {
-        setSaveStatus('Erro ao salvar');
-      }
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [content, noteTitle]);
-
-  const handleOpenCreateModal = (targetFolderId: string = '') => {
+  const handleOpenCreateModal = (targetFolderId: string = '', _targetClientId?: string) => {
     setModalTitleInput(`Anotação ${notes.length + 1}`);
     setModalTargetFolderId(targetFolderId);
     setOpenMenuId(null);
@@ -443,6 +637,21 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
       const newNote = onCreateRichNote
         ? await onCreateRichNote(title, targetFolder)
         : await onCreateNote(title, targetFolder);
+
+      if (targetFolder) {
+        const { folderIds, clientId } = getFolderAncestorsAndClient(targetFolder, folders);
+        const toExpand: Record<string, boolean> = {};
+        folderIds.forEach((id) => {
+          toExpand[id] = true;
+        });
+        if (clientId) {
+          toExpand[`client_${clientId}`] = true;
+        }
+        setExpandedFolders((prev) => ({ ...prev, ...toExpand }));
+      }
+      if (modalTargetClientId) {
+        setExpandedFolders((prev) => ({ ...prev, [`client_${modalTargetClientId}`]: true }));
+      }
 
       setActiveNote(newNote);
       setIsCreateModalOpen(false);
@@ -550,6 +759,11 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
       if (onDeleteFolder) {
         await onDeleteFolder(folderToDelete.id, deleteContents);
       }
+      setExpandedFolders((prev) => {
+        const next = { ...prev };
+        delete next[folderToDelete.id];
+        return next;
+      });
       setFolderToDelete(null);
     } catch (err) {
       console.error('Erro ao excluir pasta:', err);
@@ -593,6 +807,20 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
         id: activeNote.id,
         folderId: folderId || '',
       });
+      if (folderId) {
+        const { folderIds, clientId } = getFolderAncestorsAndClient(folderId, folders);
+        const toExpand: Record<string, boolean> = {};
+        folderIds.forEach((id) => {
+          toExpand[id] = true;
+        });
+        if (clientId) {
+          toExpand[`client_${clientId}`] = true;
+        }
+        setExpandedFolders((prev) => ({ ...prev, ...toExpand }));
+      }
+      if (currentSessionRef.current && currentSessionRef.current.noteId === updated.id) {
+        currentSessionRef.current.filePath = updated.filePath;
+      }
       setActiveNote(updated);
     } catch (err) {
       console.error('Erro ao mover nota de pasta:', err);
@@ -834,7 +1062,6 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
 
   const handleExportAsTxt = async (note: NoteItem) => {
     try {
-      setIsExporting(true);
       let raw = content;
       if (note.id !== activeNote?.id && note.filePath) {
         raw = await onReadContent(note.filePath);
@@ -844,7 +1071,6 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
     } catch (err) {
       console.error('Erro ao exportar .txt:', err);
     } finally {
-      setIsExporting(false);
       setIsExportModalOpen(false);
     }
   };
@@ -997,6 +1223,17 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
             ? await window.electronAPI.saveFileNote(payload)
             : null;
           if (fileNote) {
+            if (finalFolderId) {
+              const { folderIds, clientId } = getFolderAncestorsAndClient(finalFolderId, folders);
+              const toExpand: Record<string, boolean> = {};
+              folderIds.forEach((id) => {
+                toExpand[id] = true;
+              });
+              if (clientId) {
+                toExpand[`client_${clientId}`] = true;
+              }
+              setExpandedFolders((prev) => ({ ...prev, ...toExpand }));
+            }
             if (finalClientId) {
               const targetClient = clients.find((c) => c.id === finalClientId);
               if (targetClient && onSaveClient) {
@@ -1039,6 +1276,17 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
               ? await window.electronAPI.saveFileNote(payload)
               : null;
             if (fileNote) {
+              if (finalFolderId) {
+                const { folderIds, clientId } = getFolderAncestorsAndClient(finalFolderId, folders);
+                const toExpand: Record<string, boolean> = {};
+                folderIds.forEach((id) => {
+                  toExpand[id] = true;
+                });
+                if (clientId) {
+                  toExpand[`client_${clientId}`] = true;
+                }
+                setExpandedFolders((prev) => ({ ...prev, ...toExpand }));
+              }
               if (finalClientId) {
                 const targetClient = clients.find((c) => c.id === finalClientId);
                 if (targetClient && onSaveClient) {
@@ -1079,7 +1327,7 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
   };
 
   // Drag and drop handlers for moving notes and folders
-  const dragExpandTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const dragExpandTimeoutRef = useRef<any>(null);
 
   const handleDragStart = (e: React.DragEvent, noteId: string) => {
     draggedNoteIdRef.current = noteId;
@@ -2612,10 +2860,12 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
               type="text"
               className="input-field"
               value={noteTitle}
-              onChange={(e) => setNoteTitle(e.target.value)}
+              onChange={(e) => handleUserTitleChange(e.target.value)}
               style={styles.titleInput}
               placeholder="Título da Anotação..."
-              disabled={isFileNote(activeNote)}
+              disabled={isFileNote(activeNote) || isLoadingContent || loadedNoteId !== activeNote?.id}
+              spellCheck={true}
+              lang="pt-BR"
             />
 
             {/* Client Asset Badge & Quick Action */}
@@ -2800,11 +3050,27 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
                 onClose={() => setActiveNote(null)}
                 embedded={true}
               />
+            ) : isLoadingContent || loadedNoteId !== activeNote.id ? (
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  color: 'var(--text-secondary)',
+                  fontSize: '13px',
+                }}
+              >
+                <RefreshCw size={20} className="spin-animation" style={{ animation: 'spin 1s linear infinite' }} />
+                <span>Carregando anotação...</span>
+              </div>
             ) : (
               <RichTextEditor
                 key={activeNote.id}
                 content={content}
-                onChange={(html) => setContent(html)}
+                onChange={handleUserContentChange}
               />
             )}
           </div>
@@ -2920,6 +3186,8 @@ export const NoteEditorComponent: React.FC<NoteEditorProps> = ({
                   onChange={(e) => setModalTitleInput(e.target.value)}
                   placeholder="Ex: Anotações da Reunião..."
                   autoFocus
+                  spellCheck={true}
+                  lang="pt-BR"
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>

@@ -13,7 +13,6 @@ import {
   RotateCcw,
   X,
   Image as ImageIcon,
-  FileImage,
   Eye,
   Copy,
   Check,
@@ -1154,11 +1153,12 @@ export const ResizableImage = Image.extend({
   draggable: true,
   selectable: true,
 
-  addOptions() {
+  addOptions(): any {
     return {
       ...this.parent?.(),
       inline: true,
       allowBase64: true,
+      HTMLAttributes: {},
     };
   },
 

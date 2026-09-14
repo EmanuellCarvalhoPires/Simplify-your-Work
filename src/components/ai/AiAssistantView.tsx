@@ -11,6 +11,7 @@ import {
   Sparkles,
   AlertCircle,
   LogIn,
+  Settings,
 } from 'lucide-react';
 import type { ActiveAiProvider } from '../../types/index';
 import { AI_PROVIDERS } from '../../types/index';
@@ -245,6 +246,29 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
         {/* Status da Sessão e Ações Externas */}
         <div style={styles.rightGroup}>
+          {onOpenSettings && (
+            <button
+              onClick={onOpenSettings}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: 'var(--text-secondary)',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+              title="Configurar IAs e Provedores"
+            >
+              <Settings size={14} />
+              <span>Configurações</span>
+            </button>
+          )}
+
           <div style={styles.badge} title="Sessão e login são salvos automaticamente no aplicativo">
             <ShieldCheck size={14} color="#10b981" />
             <span>Sessão Persistente</span>
@@ -320,7 +344,9 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
           ref={webviewRef}
           src={currentUrl}
           partition={`persist:ai_${provider}`}
-          allowpopups="true"
+          allowpopups={true}
+          useragent={CHROME_UA}
+          webpreferences="contextIsolation=yes, javascript=yes, webgl=yes, experimentalFeatures=yes"
           style={{
             width: '100%',
             height: '100%',

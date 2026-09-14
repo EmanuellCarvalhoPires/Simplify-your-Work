@@ -6,6 +6,8 @@ export type TicketStatus =
   | 'TO_DO'
   | 'WAITING_CLIENT'
   | 'BACKLOG'
+  | 'PRIORITIZED'
+  | 'BLOCKED'
   | 'DONE';
 
 export interface JiraComment {
@@ -74,6 +76,7 @@ export interface JiraInstance {
   refreshToken?: string;
   cloudId?: string;
   avatarUrl?: string;
+  createdAt?: string;
 }
 
 export type ReminderRecurrence = 'ONCE' | 'DAILY' | 'INTERVAL';
@@ -87,6 +90,7 @@ export interface Reminder {
   intervalMinutes?: number;
   scheduledTime?: string;
   enabled: boolean;
+  isActive?: boolean;
   lastTriggered?: string;
   clientId?: string;
   createdAt: string;
@@ -213,6 +217,8 @@ export interface NoteItem {
   title: string;
   filePath: string;
   updatedAt: string;
+  createdAt?: string;
+  content?: string;
   format?: 'markdown' | 'richtext' | 'file';
   fileType?: 'pdf' | 'docx' | 'xlsx' | 'xls' | 'csv' | 'image' | 'text' | 'other';
   originalFileName?: string;
@@ -361,6 +367,7 @@ export interface ElectronAPI {
     ticketKey: string;
     instanceId?: string;
     commentBody: string;
+    isInternal?: boolean;
   }) => Promise<{ success: boolean; comment: JiraComment; ticket?: Ticket }>;
 
   getSavedJqlQueries: () => Promise<SavedJqlQuery[]>;
@@ -368,7 +375,7 @@ export interface ElectronAPI {
   deleteJqlQuery: (id: string) => Promise<boolean>;
 
   getTickets: () => Promise<Ticket[]>;
-  saveTicket: (ticket: Partial<Ticket>): Promise<Ticket>;
+  saveTicket: (ticket: Partial<Ticket>) => Promise<Ticket>;
   deleteTicket: (id: string) => Promise<boolean>;
   deleteTickets: (ids: string[]) => Promise<boolean>;
   updateTicketStatuses: (ids: string[], status: TicketStatus, statusLabel?: string) => Promise<boolean>;
@@ -388,6 +395,7 @@ export interface ElectronAPI {
   createRichNote: (title: string, folderId?: string) => Promise<NoteItem>;
   saveFileNote: (fileData: { title: string; fileName: string; mimeType: string; base64: string; size: number; folderId?: string }) => Promise<NoteItem>;
   updateNoteMeta: (note: Partial<NoteItem> & { id: string }) => Promise<NoteItem>;
+  saveNoteMeta?: (note: Partial<NoteItem> & { id: string }) => Promise<NoteItem>;
   deleteNote: (id: string) => Promise<boolean>;
   exportNoteAsTxt: (content: string, defaultFileName: string) => Promise<boolean>;
   saveNoteImage: (base64Data: string, ext: string) => Promise<string>;
@@ -408,6 +416,9 @@ export interface ElectronAPI {
   setActiveUser: (id: string) => Promise<UserProfile | null>;
   saveUser: (user: Partial<UserProfile>) => Promise<UserProfile>;
   deleteUser: (id: string) => Promise<boolean>;
+
+  // App Info & Version
+  getAppVersion: () => Promise<string>;
 
   // Auto Updater
   getUpdateStatus: () => Promise<{
@@ -443,10 +454,13 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<boolean>;
   getLegalDocs: () => Promise<{ termsContent: string; privacyContent: string }>;
   openGoogleAuthWindow: (provider: string, serviceUrl?: string) => Promise<{ success: boolean; url?: string; closedByUser?: boolean }>;
+  getSpellCheckerLanguages?: () => Promise<string[]>;
+  setSpellCheckerLanguages?: (languages: string[]) => Promise<boolean>;
+  addWordToDictionary?: (word: string) => Promise<boolean>;
 }
 
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
+    electronAPI?: ElectronAPI;
   }
 }

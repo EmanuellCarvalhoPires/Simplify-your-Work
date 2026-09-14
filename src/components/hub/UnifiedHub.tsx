@@ -5,17 +5,10 @@ import {
   LayoutDashboard,
   Bell,
   FileText,
-  Clock,
-  AlertCircle,
-  Tag,
-  MessageSquare,
-  Send,
   Sparkles,
-  Plus,
   Table as TableIcon,
   LayoutGrid,
   ExternalLink,
-  CheckCircle2,
 } from 'lucide-react';
 
 export type HubItemType = 'ticket' | 'reminder' | 'note';
@@ -497,7 +490,7 @@ const ReminderHubCard: React.FC<{
   reminder: Reminder;
   onTestReminder: (r: Reminder) => void;
   onEditClick: () => void;
-}> = ({ reminder, onTestReminder, onEditClick }) => {
+}> = ({ reminder, onTestReminder, onEditClick: _onEditClick }) => {
   return (
     <div style={{ ...styles.hubCard, borderLeft: '5px solid #f59e0b' }}>
       <div style={styles.cardHeader}>

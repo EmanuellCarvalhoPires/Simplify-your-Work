@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import { marked } from 'marked';
 import type { Ticket, TicketStatus, JiraInstance, NoteItem } from '../../types/index';
 import { FileViewerModal } from '../common/FileViewerModal';
@@ -16,8 +16,6 @@ import {
   Edit2,
   Check,
   CheckCircle2,
-  Calendar,
-  Tag as TagIcon,
   AlertCircle,
   Copy,
   Link2,
@@ -27,7 +25,6 @@ import {
   FileText,
   FileCode,
   Eye,
-  BookOpen,
   Lock,
   Globe,
 } from 'lucide-react';

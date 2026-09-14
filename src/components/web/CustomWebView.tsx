@@ -10,7 +10,7 @@ import {
   AlertCircle,
   Copy,
   Check,
-  Globe,
+  Edit3,
 } from 'lucide-react';
 import type { CustomSite } from '../../types/index';
 import { DynamicCustomIcon } from '../common/BrandIcons';
@@ -18,9 +18,10 @@ import { DynamicCustomIcon } from '../common/BrandIcons';
 interface CustomWebViewProps {
   site: CustomSite;
   onOpenSettings?: () => void;
+  onEditSite?: (site: CustomSite) => void;
 }
 
-export const CustomWebView: React.FC<CustomWebViewProps> = ({ site }) => {
+export const CustomWebView: React.FC<CustomWebViewProps> = ({ site, onOpenSettings, onEditSite }) => {
   const webviewRef = useRef<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -194,6 +195,23 @@ export const CustomWebView: React.FC<CustomWebViewProps> = ({ site }) => {
             <span>{copied ? 'Copiado!' : 'Copiar URL'}</span>
           </button>
 
+          {(onEditSite || onOpenSettings) && (
+            <button
+              onClick={() => {
+                if (onEditSite) {
+                  onEditSite(site);
+                } else if (onOpenSettings) {
+                  onOpenSettings();
+                }
+              }}
+              style={styles.pillButton}
+              title="Editar configurações deste site (nome, URL, ícone, cor)"
+            >
+              <Edit3 size={14} color="#38bdf8" />
+              <span>Editar Site</span>
+            </button>
+          )}
+
           <div style={styles.badge} title="Cookies, logins e dados permanecem salvos no aplicativo">
             <ShieldCheck size={14} color="#10b981" />
             <span>Sessão Persistente</span>
@@ -255,7 +273,8 @@ export const CustomWebView: React.FC<CustomWebViewProps> = ({ site }) => {
           ref={webviewRef}
           src={initialUrl}
           partition={partitionName}
-          allowpopups="true"
+          allowpopups={true}
+          webpreferences="contextIsolation=yes, javascript=yes, webgl=yes, experimentalFeatures=yes"
           style={{
             width: '100%',
             height: '100%',

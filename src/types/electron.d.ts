@@ -154,6 +154,9 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<boolean>;
   getLegalDocs: () => Promise<{ termsContent: string; privacyContent: string }>;
   openGoogleAuthWindow: (provider: string, serviceUrl?: string) => Promise<{ success: boolean; url?: string; closedByUser?: boolean }>;
+  getSpellCheckerLanguages?: () => Promise<string[]>;
+  setSpellCheckerLanguages?: (languages: string[]) => Promise<boolean>;
+  addWordToDictionary?: (word: string) => Promise<boolean>;
 }
 
 declare global {

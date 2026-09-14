@@ -113,11 +113,19 @@ O módulo de **Banco de Dados** gerencia toda a persistência de dados do Simpli
 | `getThemeSettings` | Nenhum | Read | Carrega as cores do tema atualmente aplicado. |
 | `saveThemeSettings` | `theme: ThemeConfig` | Update | Grava a paleta de cores no banco de dados. |
 
+### 🔤 Corretor Ortográfico & Dicionário (Spellchecker)
+| Canal / Método IPC | Parâmetros | Tipo de Operação | Descrição |
+| :--- | :--- | :--- | :--- |
+| `spellcheck:getLanguages` / `getSpellCheckerLanguages` | Nenhum | Read | Retorna a lista de idiomas ativos no corretor ortográfico do Electron (`pt-BR`, `en-US`). |
+| `spellcheck:setLanguages` / `setSpellCheckerLanguages` | `languages: string[]` | Update | Configura a lista de idiomas de correção ortográfica do `session.defaultSession`. |
+| `spellcheck:addWord` / `addWordToDictionary` | `word: string` | Create / Update | Adiciona uma nova palavra personalizada ao dicionário local do corretor ortográfico do Electron. |
+
 ---
 
 ## 4. Histórico de Versões e Modificações
 | Versão | Data | Autor / Agente | O que foi modificado / Adicionado |
 | :--- | :--- | :--- | :--- |
+| `v1.9.0` | 2026-08-26 | Antigravity AI | Adicionados canais IPC `spellcheck:getLanguages`, `spellcheck:setLanguages` e `spellcheck:addWord` para gerenciamento de idiomas e dicionário customizado do corretor ortográfico nativo do Chromium/Electron. |
 | `v1.8.0` | 2026-08-20 | Antigravity AI | Auditoria de integridade e sincronização das definições de `openNoteFolder`, `showItemInFolder` e `openGoogleAuthWindow` em `src/types/index.ts` e `src/types/electron.d.ts`. |
 | `v1.7.0` | 2026-08-19 | Antigravity AI | Adicionado campo `isArchived INTEGER DEFAULT 0` tanto na tabela `notes` quanto na tabela `note_folders` do SQLite (com migration automática `ALTER TABLE`) e novo canal IPC `system:showItemInFolder` (`showItemInFolder`) para abrir a localização física de qualquer anotação/documento no Windows Explorer. |
 | `v1.6.0` | 2026-08-17 | Antigravity AI | Sincronização completa de tipos do ElectronAPI em `electron.d.ts` e `index.ts`, abrangendo métodos de anotações, visualizador de arquivos, agenda e detecção de reuniões. |

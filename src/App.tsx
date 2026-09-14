@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sidebar, loadStoredSidebarConfig, loadStoredCustomSites } from './components/layout/Sidebar';
+import { Sidebar, loadStoredSidebarConfig, loadStoredCustomSites, normalizeSidebarConfig } from './components/layout/Sidebar';
 import type { NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { TicketBoard } from './components/tickets/TicketBoard';
@@ -12,12 +12,13 @@ import { TeamsView } from './components/teams/TeamsView';
 import { OutlookView } from './components/outlook/OutlookView';
 import { AiAssistantView } from './components/ai/AiAssistantView';
 import { CustomWebView } from './components/web/CustomWebView';
+import { CustomSiteModal } from './components/common/CustomSiteModal';
 import { FileViewerModal } from './components/common/FileViewerModal';
 import { UserModal } from './components/common/UserModal';
 import { GlobalSearchModal } from './components/search/GlobalSearchModal';
 import { UpdateModal } from './components/common/UpdateModal';
 import type { GlobalSearchResult } from './components/search/GlobalSearchModal';
-import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile, NoteFolder, ClientAsset, CalendarEvent, AiAssistantConfig, SidebarConfig, CustomSite } from './types/index';
+import type { Ticket, JiraInstance, Reminder, NoteItem, ThemeConfig, TicketStatus, UserProfile, NoteFolder, ClientAsset, CalendarEvent, AiAssistantConfig, SidebarConfig, SidebarEntry, SidebarGroupEntry, CustomSite } from './types/index';
 import { DEFAULT_THEME, DEFAULT_AI_CONFIG } from './types/index';
 
 class ViewErrorBoundary extends React.Component<
@@ -64,9 +65,6 @@ class ViewErrorBoundary extends React.Component<
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('tickets');
-  const [hasOpenedTeams, setHasOpenedTeams] = useState(true);
-  const [hasOpenedOutlook, setHasOpenedOutlook] = useState(true);
-  const [hasOpenedAi, setHasOpenedAi] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [aiConfig, setAiConfig] = useState<AiAssistantConfig>(() => {
@@ -93,15 +91,6 @@ export default function App() {
     return DEFAULT_AI_CONFIG;
   });
 
-  useEffect(() => {
-    if (activeTab === 'teams' && !hasOpenedTeams) {
-      setHasOpenedTeams(true);
-    }
-    if (activeTab === 'outlook' && !hasOpenedOutlook) {
-      setHasOpenedOutlook(true);
-    }
-  }, [activeTab, hasOpenedTeams, hasOpenedOutlook]);
-
   const handleSaveAiConfig = async (config: AiAssistantConfig) => {
     const cleanConfig: AiAssistantConfig = {
       enabledProviders: Array.isArray(config.enabledProviders)
@@ -116,22 +105,24 @@ export default function App() {
     }
   };
 
+  const [customSites, setCustomSites] = useState<CustomSite[]>(() => {
+    return loadStoredCustomSites();
+  });
+
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => {
-    return loadStoredSidebarConfig();
+    const sites = loadStoredCustomSites();
+    return loadStoredSidebarConfig(sites);
   });
 
   const handleSaveSidebarConfig = (config: SidebarConfig) => {
-    setSidebarConfig(config);
+    const normalized = normalizeSidebarConfig(config, customSites, aiConfig);
+    setSidebarConfig(normalized);
     try {
-      localStorage.setItem('simplify_sidebar_config', JSON.stringify(config));
+      localStorage.setItem('simplify_sidebar_config', JSON.stringify(normalized));
     } catch (e) {
       console.error('Erro ao salvar simplify_sidebar_config:', e);
     }
   };
-
-  const [customSites, setCustomSites] = useState<CustomSite[]>(() => {
-    return loadStoredCustomSites();
-  });
 
   const handleSaveCustomSite = (site: CustomSite) => {
     setCustomSites((prev) => {
@@ -147,15 +138,193 @@ export default function App() {
   };
 
   const handleDeleteCustomSite = (id: string) => {
-    setCustomSites((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      try {
-        localStorage.setItem('simplify_custom_sites', JSON.stringify(updated));
-      } catch (e) {
-        console.error('Erro ao salvar simplify_custom_sites:', e);
+    const updatedSites = customSites.filter((s) => s.id !== id);
+    setCustomSites(updatedSites);
+    try {
+      localStorage.setItem('simplify_custom_sites', JSON.stringify(updatedSites));
+    } catch (e) {
+      console.error('Erro ao salvar simplify_custom_sites:', e);
+    }
+
+    // Limpar da barra lateral
+    const cleanedEntries: SidebarEntry[] = [];
+    sidebarConfig.entries.forEach((entry) => {
+      if (entry.type === 'item') {
+        if (entry.id !== id) cleanedEntries.push(entry);
+      } else if (entry.type === 'group') {
+        cleanedEntries.push({
+          ...entry,
+          itemIds: (entry.itemIds || []).filter((itemId) => itemId !== id),
+        });
       }
-      return updated;
     });
+
+    const normalized = normalizeSidebarConfig({ entries: cleanedEntries }, updatedSites, aiConfig);
+    setSidebarConfig(normalized);
+    try {
+      localStorage.setItem('simplify_sidebar_config', JSON.stringify(normalized));
+    } catch (e) {
+      console.error('Erro ao salvar simplify_sidebar_config:', e);
+    }
+
+    if (activeTab === id) {
+      setActiveTab('tickets');
+    }
+  };
+
+  const [siteModalState, setSiteModalState] = useState<{
+    isOpen: boolean;
+    siteToEdit: CustomSite | null;
+    targetGroupId?: string;
+  }>({
+    isOpen: false,
+    siteToEdit: null,
+    targetGroupId: 'root',
+  });
+
+  const handleOpenCreateSiteModal = (targetGroupId?: string) => {
+    setSiteModalState({
+      isOpen: true,
+      siteToEdit: null,
+      targetGroupId: targetGroupId || 'root',
+    });
+  };
+
+  const handleOpenEditSiteModal = (site: CustomSite) => {
+    let currentGroup = 'root';
+    for (const entry of sidebarConfig.entries) {
+      if (entry.type === 'group' && (entry.itemIds || []).includes(site.id as any)) {
+        currentGroup = entry.id;
+        break;
+      }
+    }
+    setSiteModalState({
+      isOpen: true,
+      siteToEdit: site,
+      targetGroupId: currentGroup,
+    });
+  };
+
+  const handleSaveCustomSiteModal = (
+    siteData: {
+      id?: string;
+      title: string;
+      url: string;
+      icon: string;
+      color: string;
+    },
+    targetGroupId: string
+  ) => {
+    const title = siteData.title.trim();
+    let url = siteData.url.trim();
+    if (!title || !url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+
+    if (siteData.id) {
+      const updatedSite: CustomSite = {
+        id: siteData.id,
+        title,
+        url,
+        icon: siteData.icon,
+        color: siteData.color,
+        createdAt: siteModalState.siteToEdit?.createdAt || new Date().toISOString(),
+        partition: siteModalState.siteToEdit?.partition || `persist:custom_${siteData.id}`,
+      };
+
+      const updatedSites = customSites.map((s) => (s.id === siteData.id ? updatedSite : s));
+      setCustomSites(updatedSites);
+      try {
+        localStorage.setItem('simplify_custom_sites', JSON.stringify(updatedSites));
+      } catch (e) {
+        console.error(e);
+      }
+
+      let currentGroup = 'root';
+      for (const entry of sidebarConfig.entries) {
+        if (entry.type === 'group' && (entry.itemIds || []).includes(siteData.id as any)) {
+          currentGroup = entry.id;
+          break;
+        }
+      }
+
+      if (currentGroup !== targetGroupId) {
+        const cleanedEntries: SidebarEntry[] = [];
+        sidebarConfig.entries.forEach((entry) => {
+          if (entry.type === 'item') {
+            if (entry.id !== siteData.id) cleanedEntries.push(entry);
+          } else if (entry.type === 'group') {
+            cleanedEntries.push({
+              ...entry,
+              itemIds: (entry.itemIds || []).filter((id) => id !== siteData.id),
+            });
+          }
+        });
+
+        if (targetGroupId === 'root') {
+          cleanedEntries.push({ type: 'item', id: siteData.id as any });
+        } else {
+          const gIdx = cleanedEntries.findIndex((e) => e.type === 'group' && e.id === targetGroupId);
+          if (gIdx !== -1) {
+            const targetG = cleanedEntries[gIdx] as SidebarGroupEntry;
+            cleanedEntries[gIdx] = { ...targetG, itemIds: [...targetG.itemIds, siteData.id as any] };
+          } else {
+            cleanedEntries.push({ type: 'item', id: siteData.id as any });
+          }
+        }
+
+        const normalized = normalizeSidebarConfig({ entries: cleanedEntries }, updatedSites, aiConfig);
+        setSidebarConfig(normalized);
+        try {
+          localStorage.setItem('simplify_sidebar_config', JSON.stringify(normalized));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } else {
+      const newId = `site_${Date.now()}`;
+      const newSite: CustomSite = {
+        id: newId,
+        title,
+        url,
+        icon: siteData.icon,
+        color: siteData.color,
+        partition: `persist:custom_${newId}`,
+        createdAt: new Date().toISOString(),
+      };
+
+      const updatedSites = [...customSites, newSite];
+      setCustomSites(updatedSites);
+      try {
+        localStorage.setItem('simplify_custom_sites', JSON.stringify(updatedSites));
+      } catch (e) {
+        console.error(e);
+      }
+
+      const newEntries = [...sidebarConfig.entries];
+      if (targetGroupId === 'root') {
+        newEntries.push({ type: 'item', id: newId });
+      } else {
+        const gIdx = newEntries.findIndex((e) => e.type === 'group' && e.id === targetGroupId);
+        if (gIdx !== -1) {
+          const g = newEntries[gIdx] as SidebarGroupEntry;
+          newEntries[gIdx] = { ...g, itemIds: [...(g.itemIds || []), newId] };
+        } else {
+          newEntries.push({ type: 'item', id: newId });
+        }
+      }
+
+      const normalized = normalizeSidebarConfig({ entries: newEntries }, updatedSites, aiConfig);
+      setSidebarConfig(normalized);
+      try {
+        localStorage.setItem('simplify_sidebar_config', JSON.stringify(normalized));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    setSiteModalState({ isOpen: false, siteToEdit: null, targetGroupId: 'root' });
   };
 
   // Initial State loaded from localStorage (Instant local persistence layer)
@@ -527,7 +696,6 @@ export default function App() {
     if (window.electronAPI) {
       saved = await window.electronAPI.saveTicket(ticketData);
     } else {
-      const isNew = !ticketData.id;
       let localKey = ticketData.key || '';
       if ((ticketData.source === 'LOCAL' || !ticketData.source) && !localKey) {
         const safePrev = Array.isArray(tickets) ? tickets.filter(Boolean) : [];
@@ -607,10 +775,11 @@ export default function App() {
 
   const handleDeleteTickets = async (ids: string[]) => {
     if (!ids || ids.length === 0) return;
-    if (window.electronAPI && window.electronAPI.deleteTickets) {
-      await window.electronAPI.deleteTickets(ids);
-    } else if (window.electronAPI && window.electronAPI.deleteTicket) {
-      await Promise.all(ids.map((id) => window.electronAPI.deleteTicket(id)));
+    const api = window.electronAPI;
+    if (api?.deleteTickets) {
+      await api.deleteTickets(ids);
+    } else if (api?.deleteTicket) {
+      await Promise.all(ids.map((id) => api.deleteTicket(id)));
     }
     const idsSet = new Set(ids);
     setTickets((prev) => {
@@ -659,8 +828,8 @@ export default function App() {
   // Handlers for Jira Instances
   const handleSaveJiraInstance = async (inst: Partial<JiraInstance>) => {
     let saved: JiraInstance;
-    if (window.electronAPI) {
-      saved = await window.electronAPI.saveJiraInstance(inst);
+    if (window.electronAPI?.saveJiraInstance) {
+      saved = await window.electronAPI.saveJiraInstance(inst as any);
     } else {
       saved = {
         id: inst.id || `jira_inst_${Date.now()}`,
@@ -739,14 +908,6 @@ export default function App() {
       localStorage.setItem('simplify_reminders', JSON.stringify(updatedList));
       return updatedList;
     });
-  };
-
-  const handleTestReminderFromHub = async (rem: Reminder) => {
-    if (window.electronAPI && window.electronAPI.testReminder) {
-      await window.electronAPI.testReminder(rem);
-    } else if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(`⏰ ${rem.title}`, { body: rem.message, icon: './assets/app-icon.png' });
-    }
   };
 
   // Handlers for Notes
@@ -1122,6 +1283,9 @@ export default function App() {
         aiConfig={aiConfig}
         sidebarConfig={sidebarConfig}
         customSites={customSites}
+        onOpenCreateSiteModal={handleOpenCreateSiteModal}
+        onOpenEditSiteModal={handleOpenEditSiteModal}
+        onDeleteCustomSite={handleDeleteCustomSite}
       />
 
       <div style={styles.mainContainer}>
@@ -1207,6 +1371,7 @@ export default function App() {
                 calendarEvents={calendarEvents}
                 reminders={reminders}
                 jiraInstances={jiraInstances}
+                initialClientId={targetClientIdForClientsView}
                 onSaveClient={handleSaveClient}
                 onDeleteClient={handleDeleteClient}
                 onSaveTicket={handleSaveTicket}
@@ -1290,6 +1455,7 @@ export default function App() {
                 <CustomWebView
                   site={site}
                   onOpenSettings={() => setActiveTab('settings')}
+                  onEditSite={handleOpenEditSiteModal}
                 />
               </div>
             ))}
@@ -1354,6 +1520,20 @@ export default function App() {
           userToEdit={userModalState.userToEdit}
           onSave={handleSaveUser}
           onClose={() => setUserModalState({ isOpen: false, userToEdit: null })}
+        />
+      )}
+
+      {siteModalState.isOpen && (
+        <CustomSiteModal
+          isOpen={siteModalState.isOpen}
+          siteToEdit={siteModalState.siteToEdit}
+          targetGroupId={siteModalState.targetGroupId}
+          availableGroups={sidebarConfig.entries.filter(
+            (e): e is SidebarGroupEntry => e.type === 'group'
+          )}
+          onSave={handleSaveCustomSiteModal}
+          onClose={() => setSiteModalState({ isOpen: false, siteToEdit: null, targetGroupId: 'root' })}
+          onDelete={handleDeleteCustomSite}
         />
       )}
 

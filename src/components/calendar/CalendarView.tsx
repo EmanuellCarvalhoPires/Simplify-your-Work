@@ -11,15 +11,11 @@ import {
   ChevronRight,
   Layers,
   ExternalLink,
-  Info,
   Check,
-  Globe,
   Plus,
-  Trash2,
   X,
   Clock,
   FileText,
-  Tag,
   Link as LinkIcon,
   Unlink,
   Eye,
@@ -1331,7 +1327,7 @@ function TimelineView({
               gridTemplateColumns: `repeat(${numColumns}, minmax(0, 1fr))`,
             }}
           >
-            {days.map((day, di) => {
+            {days.map((_day, di) => {
               const dayAllDay = allDayEventsByDay[di] || [];
               return (
                 <div
@@ -1740,7 +1736,7 @@ function WeekView({
 function MonthView({
   currentDate,
   allFiltered,
-  isMultiCalendar,
+  isMultiCalendar: _isMultiCalendar,
   onSelectDay,
   onEventClick,
 }: {

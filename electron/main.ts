@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, dialog, session, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, MenuItem, nativeImage, shell, dialog, session, desktopCapturer } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -98,6 +98,13 @@ app.commandLine.appendSwitch('disable-features', 'WidgetLayering,WebAuthenticati
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing');
 app.commandLine.appendSwitch('allow-http-screen-capture');
 
+// Force Hardware Acceleration, WebGL, GPU Rasterization & High-Performance Canvas for Whiteboards (Confluence/Jira/Figma/Miro) and WebViews
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
+app.commandLine.appendSwitch('enable-features', 'CanvasOopRasterization,VaapiVideoDecoder');
+
 // Configure Windows AppUserModelId so Windows Action Center and Taskbar accept native notifications & icons
 if (process.platform === 'win32') {
   if (app.isPackaged) {
@@ -163,6 +170,7 @@ function createWindow() {
       contextIsolation: true,
       sandbox: false,
       webviewTag: true,
+      spellcheck: true,
     },
   });
 
@@ -259,7 +267,152 @@ function setupTray() {
   });
 }
 
+function setupSpellCheckAndContextMenu(targetWebContents: Electron.WebContents) {
+  if (!targetWebContents || (targetWebContents as any).__spellCheckMenuAttached) return;
+  (targetWebContents as any).__spellCheckMenuAttached = true;
+
+  targetWebContents.on('context-menu', (_event, params) => {
+    if (targetWebContents.isDestroyed()) return;
+    const menu = new Menu();
+
+    // 1. Sugestões de Correção Ortográfica (quando clicar com o botão direito sobre uma palavra com erro)
+    if (params.misspelledWord) {
+      if (params.dictionarySuggestions && params.dictionarySuggestions.length > 0) {
+        params.dictionarySuggestions.forEach((suggestion) => {
+          menu.append(
+            new MenuItem({
+              label: suggestion,
+              click: () => {
+                if (!targetWebContents.isDestroyed()) {
+                  targetWebContents.replaceMisspelling(suggestion);
+                }
+              },
+            })
+          );
+        });
+      } else {
+        menu.append(
+          new MenuItem({
+            label: 'Nenhuma sugestão encontrada',
+            enabled: false,
+          })
+        );
+      }
+
+      menu.append(new MenuItem({ type: 'separator' }));
+
+      // Adicionar palavra ao dicionário do aplicativo
+      menu.append(
+        new MenuItem({
+          label: `Adicionar "${params.misspelledWord}" ao Dicionário`,
+          click: () => {
+            if (!targetWebContents.isDestroyed()) {
+              targetWebContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+            }
+          },
+        })
+      );
+
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+
+    // 2. Ações padrão de edição de texto
+    if (params.isEditable) {
+      menu.append(
+        new MenuItem({
+          label: 'Desfazer',
+          role: 'undo',
+          enabled: params.editFlags.canUndo,
+        })
+      );
+      menu.append(
+        new MenuItem({
+          label: 'Refazer',
+          role: 'redo',
+          enabled: params.editFlags.canRedo,
+        })
+      );
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(
+        new MenuItem({
+          label: 'Recortar',
+          role: 'cut',
+          enabled: params.editFlags.canCut,
+        })
+      );
+      menu.append(
+        new MenuItem({
+          label: 'Copiar',
+          role: 'copy',
+          enabled: params.editFlags.canCopy,
+        })
+      );
+      menu.append(
+        new MenuItem({
+          label: 'Colar',
+          role: 'paste',
+          enabled: params.editFlags.canPaste,
+        })
+      );
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(
+        new MenuItem({
+          label: 'Selecionar Tudo',
+          role: 'selectAll',
+          enabled: params.editFlags.canSelectAll,
+        })
+      );
+    } else if (params.selectionText) {
+      menu.append(
+        new MenuItem({
+          label: 'Copiar',
+          role: 'copy',
+          enabled: params.editFlags.canCopy,
+        })
+      );
+      menu.append(
+        new MenuItem({
+          label: 'Selecionar Tudo',
+          role: 'selectAll',
+          enabled: params.editFlags.canSelectAll,
+        })
+      );
+    }
+
+    // Exibe o menu se houver opções disponíveis
+    if (menu.items.length > 0) {
+      const win = BrowserWindow.fromWebContents(targetWebContents);
+      menu.popup({ window: win || undefined });
+    }
+  });
+}
+
 function registerIpcHandlers() {
+  // === SPELLCHECKER / CORRETOR ORTOGRÁFICO ===
+  ipcMain.handle('spellcheck:getLanguages', () => {
+    return session.defaultSession.getSpellCheckerLanguages();
+  });
+
+  ipcMain.handle('spellcheck:setLanguages', (_, languages: string[]) => {
+    try {
+      session.defaultSession.setSpellCheckerLanguages(languages);
+      return true;
+    } catch (err) {
+      console.error('[SpellCheck setLanguages error]:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('spellcheck:addWord', (_, word: string) => {
+    try {
+      session.defaultSession.addWordToSpellCheckerDictionary(word);
+      return true;
+    } catch (err) {
+      console.error('[SpellCheck addWord error]:', err);
+      return false;
+    }
+  });
+
   // === APP INFO & VERSION ===
   ipcMain.handle('app:getVersion', () => {
     return app.getVersion();
@@ -937,6 +1090,19 @@ function configureSessionHeadersAndPermissions(
 ) {
   targetSession.setUserAgent(MODERN_CHROME_UA);
 
+  try {
+    const available = targetSession.availableSpellCheckerLanguages || [];
+    const desired = ['pt-BR', 'pt', 'en-US', 'en'];
+    const supported = desired.filter((lang) => available.includes(lang));
+    if (supported.length > 0) {
+      targetSession.setSpellCheckerLanguages(supported);
+    } else {
+      targetSession.setSpellCheckerLanguages(['pt-BR', 'en-US']);
+    }
+  } catch (e) {
+    console.warn('[SpellChecker Session Error]:', e);
+  }
+
   targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const isGoogleAuth =
       details.url.includes('accounts.google.com') ||
@@ -1318,6 +1484,7 @@ function setupAiSession() {
 // Global handler for webContents, popups, and SSO auth windows
 app.on('web-contents-created', (_, contents) => {
   contents.setUserAgent(MODERN_CHROME_UA);
+  setupSpellCheckAndContextMenu(contents);
 
   contents.setWindowOpenHandler(({ url }) => {
     if (

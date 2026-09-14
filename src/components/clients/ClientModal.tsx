@@ -2,11 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   X,
   Briefcase,
-  Building2,
-  Tag,
   Mail,
   Phone,
-  FileText,
   Layers,
   Check,
   AlertCircle,
