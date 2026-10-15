@@ -90,6 +90,15 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
+  const handleUpdateSitesPreloadConfig = (newConfig: Record<string, boolean>) => {
+    setSitesPreloadConfig(newConfig);
+    try {
+      localStorage.setItem('simplify_sites_preload', JSON.stringify(newConfig));
+    } catch (e) {
+      console.error('Erro ao salvar simplify_sites_preload:', e);
+    }
+  };
+
   // Redireciona tabs deletadas para a Agenda
   useEffect(() => {
     if (activeTab === 'tickets' || activeTab === 'clients') {
@@ -304,12 +313,14 @@ export default function App() {
     }
 
     if (siteData.id) {
+      const isPreloadVal = (siteData as any).preload !== undefined ? !!(siteData as any).preload : !!siteModalState.siteToEdit?.preload;
       const updatedSite: CustomSite = {
         id: siteData.id,
         title,
         url,
         icon: siteData.icon,
         color: siteData.color,
+        preload: isPreloadVal,
         createdAt: siteModalState.siteToEdit?.createdAt || new Date().toISOString(),
         partition: siteModalState.siteToEdit?.partition || `persist:custom_${siteData.id}`,
       };
@@ -321,6 +332,11 @@ export default function App() {
       } catch (e) {
         console.error(e);
       }
+
+      handleUpdateSitesPreloadConfig({
+        ...sitesPreloadConfig,
+        [siteData.id]: isPreloadVal,
+      });
 
       let currentGroup = 'root';
       for (const entry of sidebarConfig.entries) {
@@ -365,12 +381,14 @@ export default function App() {
       }
     } else {
       const newId = `site_${Date.now()}`;
+      const isPreloadVal = !!(siteData as any).preload;
       const newSite: CustomSite = {
         id: newId,
         title,
         url,
         icon: siteData.icon,
         color: siteData.color,
+        preload: isPreloadVal,
         partition: `persist:custom_${newId}`,
         createdAt: new Date().toISOString(),
       };
@@ -382,6 +400,11 @@ export default function App() {
       } catch (e) {
         console.error(e);
       }
+
+      handleUpdateSitesPreloadConfig({
+        ...sitesPreloadConfig,
+        [newId]: isPreloadVal,
+      });
 
       const newEntries = [...sidebarConfig.entries];
       if (targetGroupId === 'root') {
@@ -1425,51 +1448,79 @@ export default function App() {
               />
             )}
 
-            {/* Microsoft Teams View (Suporta Pré-carregamento ou Descarregamento para Economizar RAM) */}
-            {(sitesPreloadConfig['teams'] || activeTab === 'teams') && (
-              <div
-                style={{
-                  display: activeTab === 'teams' ? 'flex' : 'none',
-                  flex: 1,
-                  width: '100%',
-                  height: '100%',
-                  overflow: 'hidden',
-                }}
-              >
-                <TeamsView />
-              </div>
-            )}
+            {/* Microsoft Teams View (Suporta Pré-carregamento persistente em segundo plano ou Economia de RAM) */}
+            {(() => {
+              const isPreloaded = !!sitesPreloadConfig['teams'];
+              const isVisible = activeTab === 'teams';
+              if (!isPreloaded && !isVisible) return null;
 
-            {/* Microsoft Outlook View (Suporta Pré-carregamento ou Descarregamento para Economizar RAM) */}
-            {(sitesPreloadConfig['outlook'] || activeTab === 'outlook') && (
-              <div
-                style={{
-                  display: activeTab === 'outlook' ? 'flex' : 'none',
-                  flex: 1,
-                  width: '100%',
-                  height: '100%',
-                  overflow: 'hidden',
-                }}
-              >
-                <OutlookView />
-              </div>
-            )}
+              return (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    visibility: isVisible ? 'visible' : 'hidden',
+                    pointerEvents: isVisible ? 'auto' : 'none',
+                    zIndex: isVisible ? 2 : -1,
+                    opacity: isVisible ? 1 : 0,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <TeamsView />
+                </div>
+              );
+            })()}
+
+            {/* Microsoft Outlook View (Suporta Pré-carregamento persistente em segundo plano ou Economia de RAM) */}
+            {(() => {
+              const isPreloaded = !!sitesPreloadConfig['outlook'];
+              const isVisible = activeTab === 'outlook';
+              if (!isPreloaded && !isVisible) return null;
+
+              return (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    visibility: isVisible ? 'visible' : 'hidden',
+                    pointerEvents: isVisible ? 'auto' : 'none',
+                    zIndex: isVisible ? 2 : -1,
+                    opacity: isVisible ? 1 : 0,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <OutlookView />
+                </div>
+              );
+            })()}
 
             {/* AI Assistants Webviews (ChatGPT, Claude, Gemini - Suporta Pré-carregamento ou Economia de RAM) */}
             {(aiConfig.enabledProviders || (aiConfig.provider && aiConfig.provider !== 'none' ? [aiConfig.provider] : []))
               .filter((p) => p !== ('rovo' as any))
               .map((provider) => {
                 const isPreloaded = !!sitesPreloadConfig[`ai_${provider}`];
-                if (!isPreloaded && activeTab !== `ai_${provider}`) return null;
+                const isVisible = activeTab === `ai_${provider}`;
+                if (!isPreloaded && !isVisible) return null;
 
                 return (
                   <div
                     key={provider}
                     style={{
-                      display: activeTab === `ai_${provider}` ? 'flex' : 'none',
-                      flex: 1,
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
                       width: '100%',
                       height: '100%',
+                      visibility: isVisible ? 'visible' : 'hidden',
+                      pointerEvents: isVisible ? 'auto' : 'none',
+                      zIndex: isVisible ? 2 : -1,
+                      opacity: isVisible ? 1 : 0,
                       overflow: 'hidden',
                     }}
                   >
@@ -1484,16 +1535,22 @@ export default function App() {
             {/* Custom Sites Webviews (OneDrive, SharePoint, WhatsApp, GitHub, etc. - Suporta Pré-carregamento ou Economia de RAM) */}
             {customSites.map((site) => {
               const isPreloaded = sitesPreloadConfig[site.id] !== undefined ? !!sitesPreloadConfig[site.id] : !!site.preload;
-              if (!isPreloaded && activeTab !== site.id) return null;
+              const isVisible = activeTab === site.id;
+              if (!isPreloaded && !isVisible) return null;
 
               return (
                 <div
                   key={site.id}
                   style={{
-                    display: activeTab === site.id ? 'flex' : 'none',
-                    flex: 1,
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
                     width: '100%',
                     height: '100%',
+                    visibility: isVisible ? 'visible' : 'hidden',
+                    pointerEvents: isVisible ? 'auto' : 'none',
+                    zIndex: isVisible ? 2 : -1,
+                    opacity: isVisible ? 1 : 0,
                     overflow: 'hidden',
                   }}
                 >
@@ -1527,6 +1584,8 @@ export default function App() {
                 onDeleteUser={handleDeleteUser}
                 onOpenCreateUserModal={() => setUserModalState({ isOpen: true, userToEdit: null })}
                 onOpenEditUserModal={(u) => setUserModalState({ isOpen: true, userToEdit: u })}
+                sitesPreloadConfig={sitesPreloadConfig}
+                onUpdateSitesPreloadConfig={handleUpdateSitesPreloadConfig}
               />
             )}
 

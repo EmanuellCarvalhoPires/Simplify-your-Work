@@ -129,121 +129,85 @@ export const normalizeSidebarConfig = (
   customSites: CustomSite[] = [],
   aiConfig?: AiAssistantConfig
 ): SidebarConfig => {
-  const safeEntries: SidebarEntry[] = Array.isArray(rawConfig?.entries)
+  const hasRawEntries = Array.isArray(rawConfig?.entries) && rawConfig.entries.length > 0;
+  const safeEntries: SidebarEntry[] = hasRawEntries
     ? JSON.parse(JSON.stringify(rawConfig.entries))
     : JSON.parse(JSON.stringify(DEFAULT_SIDEBAR_CONFIG.entries));
 
   const validSiteIds = new Set((customSites || []).map((s) => s && s.id).filter(Boolean));
+  const isExcludedItem = (id: string) => !id || id === 'tickets' || id === 'clients';
 
-  // 1. Limpar IDs de tickets, clients e sites customizados que foram deletados
-  const isExcludedItem = (id: string) => id === 'tickets' || id === 'clients';
-
+  // Conjunto para rastrear IDs e garantir que NENHUM item seja duplicado
+  const seenIds = new Set<string>();
   const cleanedEntries: SidebarEntry[] = [];
+
+  // 1. Processa entradas existentes deduplicando estritamente
   safeEntries.forEach((entry) => {
     if (!entry) return;
+
     if (entry.type === 'item') {
-      if (entry.id && isExcludedItem(entry.id)) {
+      const itemId = entry.id;
+      if (!itemId || isExcludedItem(itemId)) return;
+
+      // Se for site customizado, valida se ele ainda existe
+      if (String(itemId).startsWith('site_') && !validSiteIds.has(itemId)) {
         return;
       }
-      if (entry.id && String(entry.id).startsWith('site_')) {
-        if (validSiteIds.has(entry.id)) {
-          cleanedEntries.push(entry);
-        }
-      } else {
-        cleanedEntries.push(entry);
-      }
+
+      // Se o item já foi visto (seja em grupo ou na raiz), descarta duplicata!
+      if (seenIds.has(itemId)) return;
+
+      seenIds.add(itemId);
+      cleanedEntries.push({ type: 'item', id: itemId });
     } else if (entry.type === 'group') {
-      const filteredItemIds = (entry.itemIds || []).filter((id) => {
-        if (id && isExcludedItem(id)) return false;
-        if (id && String(id).startsWith('site_')) {
-          return validSiteIds.has(id);
-        }
-        return true;
+      const uniqueItemIds: NavTab[] = [];
+      (entry.itemIds || []).forEach((id) => {
+        if (!id || isExcludedItem(id)) return;
+        if (String(id).startsWith('site_') && !validSiteIds.has(id)) return;
+
+        // Se já foi visto em outro grupo ou raiz, não duplica!
+        if (seenIds.has(id)) return;
+
+        seenIds.add(id);
+        uniqueItemIds.push(id as NavTab);
       });
+
       cleanedEntries.push({
         ...entry,
-        itemIds: filteredItemIds,
+        itemIds: uniqueItemIds,
       });
     }
   });
 
-  // 2. Assegura grupo Microsoft
-  let groupMs = cleanedEntries.find(
-    (e) => e.type === 'group' && (e.id === 'group_microsoft' || e.title?.toLowerCase().includes('microsoft'))
-  ) as SidebarGroupEntry | undefined;
-
-  if (!groupMs) {
-    const defaultMsItems: NavTab[] = ['outlook', 'teams'];
-    if (validSiteIds.has('site_onedrive')) {
-      defaultMsItems.push('site_onedrive');
-    }
-    groupMs = {
-      type: 'group',
-      id: 'group_microsoft',
-      title: 'MICROSOFT',
-      itemIds: defaultMsItems,
-    };
-    cleanedEntries.unshift(groupMs);
+  // 2. Se a configuração inicial era totalmente vazia (primeira execução), inicializa do default
+  if (!hasRawEntries) {
+    return DEFAULT_SIDEBAR_CONFIG;
   }
 
-  // 3. Assegura grupo Agentes de IA
-  let groupAi = cleanedEntries.find(
-    (e) => e.type === 'group' && (e.id === 'group_ai' || e.title?.toLowerCase().includes('ia') || e.title?.toLowerCase().includes('ai'))
-  ) as SidebarGroupEntry | undefined;
-
-  if (!groupAi) {
-    groupAi = {
-      type: 'group',
-      id: 'group_ai',
-      title: 'AGENTES DE IA',
-      itemIds: ['ai_gemini', 'ai_claude', 'ai_chatgpt'],
-    };
-    const msIdx = cleanedEntries.indexOf(groupMs);
-    cleanedEntries.splice(msIdx + 1, 0, groupAi);
-  }
-
-  // Conjunto de todos os IDs já presentes
-  const existingIds = new Set<string>();
-  cleanedEntries.forEach((entry) => {
-    if (entry.type === 'item' && entry.id) {
-      existingIds.add(entry.id);
-    } else if (entry.type === 'group' && Array.isArray(entry.itemIds)) {
-      entry.itemIds.forEach((id) => {
-        if (id) existingIds.add(id);
-      });
-    }
-  });
-
-  // 4. Adiciona sites customizados válidos que não estejam ainda na hierarquia
+  // 3. Adiciona sites customizados válidos que ainda não estejam na hierarquia
   (customSites || []).forEach((site) => {
-    if (site && site.id && !existingIds.has(site.id)) {
-      if (site.id === 'site_onedrive' && groupMs) {
-        if (!groupMs.itemIds) groupMs.itemIds = [];
-        groupMs.itemIds.push('site_onedrive');
-      } else {
-        cleanedEntries.push({ type: 'item', id: site.id as NavTab });
-      }
-      existingIds.add(site.id);
+    if (site && site.id && !seenIds.has(site.id)) {
+      cleanedEntries.push({ type: 'item', id: site.id as NavTab });
+      seenIds.add(site.id);
     }
   });
 
-  // 5. Adiciona provedores de IA habilitados
+  // 4. Adiciona provedores de IA habilitados que ainda não estejam na hierarquia
   const enabledAi = aiConfig?.enabledProviders || ['gemini'];
   enabledAi.forEach((prov) => {
     const aiTabId = `ai_${prov}` as NavTab;
-    if (!existingIds.has(aiTabId)) {
-      if (!groupAi.itemIds) groupAi.itemIds = [];
-      groupAi.itemIds.push(aiTabId);
-      existingIds.add(aiTabId);
+    if (!seenIds.has(aiTabId)) {
+      cleanedEntries.push({ type: 'item', id: aiTabId });
+      seenIds.add(aiTabId);
     }
   });
 
-  // 6. Garante que os módulos principais existam
-  const baseItems: NavTab[] = ['calendar', 'notes', 'clients', 'reminders', 'tickets'];
+  // 5. Garante que os módulos principais nativos existam (sem tickets nem clients)
+  const baseItems: NavTab[] = ['calendar', 'notes', 'reminders'];
   baseItems.forEach((tabId) => {
-    if (!existingIds.has(tabId)) {
+    if (!seenIds.has(tabId)) {
       cleanedEntries.push({ type: 'item', id: tabId });
-      existingIds.add(tabId);
+      seenIds.add(tabId);
     }
   });
 

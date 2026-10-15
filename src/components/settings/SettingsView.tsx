@@ -83,6 +83,8 @@ interface SettingsViewProps {
   onDeleteUser?: (id: string) => Promise<void>;
   onOpenCreateUserModal?: () => void;
   onOpenEditUserModal?: (user: UserProfile) => void;
+  sitesPreloadConfig?: Record<string, boolean>;
+  onUpdateSitesPreloadConfig?: (config: Record<string, boolean>) => void;
 }
 
 const themePresets: ThemeConfig[] = [
@@ -152,6 +154,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDeleteUser,
   onOpenCreateUserModal,
   onOpenEditUserModal,
+  sitesPreloadConfig: propSitesPreloadConfig,
+  onUpdateSitesPreloadConfig,
 }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'calendar' | 'notifications' | 'database' | 'jira' | 'ai' | 'sidebar' | 'theme' | 'legal' | 'updates'>('users');
   const [legalTab, setLegalTab] = useState<'terms' | 'privacy'>('terms');
@@ -233,7 +237,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [sidebarNotice, setSidebarNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Estado de Pré-carregamento dos Sites (Otimização de Memória RAM)
-  const [sitesPreloadConfig, setSitesPreloadConfig] = useState<Record<string, boolean>>(() => {
+  const [localSitesPreloadConfig, setLocalSitesPreloadConfig] = useState<Record<string, boolean>>(() => {
+    if (propSitesPreloadConfig) return propSitesPreloadConfig;
     try {
       const saved = localStorage.getItem('simplify_sites_preload');
       if (saved) return JSON.parse(saved);
@@ -242,6 +247,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     return {};
   });
+
+  useEffect(() => {
+    if (propSitesPreloadConfig) {
+      setLocalSitesPreloadConfig(propSitesPreloadConfig);
+    }
+  }, [propSitesPreloadConfig]);
+
+  const sitesPreloadConfig = propSitesPreloadConfig || localSitesPreloadConfig;
 
   const isWebSiteItem = (itemId: string): boolean => {
     if (!itemId) return false;
@@ -267,12 +280,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const currentlyPreloaded = isItemPreloaded(itemId);
     const nextVal = !currentlyPreloaded;
 
-    const updated = { ...sitesPreloadConfig, [itemId]: nextVal };
-    setSitesPreloadConfig(updated);
+    const currentMap = sitesPreloadConfig || {};
+    const updated = { ...currentMap, [itemId]: nextVal };
+    setLocalSitesPreloadConfig(updated);
     try {
       localStorage.setItem('simplify_sites_preload', JSON.stringify(updated));
     } catch (e) {
       console.error(e);
+    }
+
+    if (onUpdateSitesPreloadConfig) {
+      onUpdateSitesPreloadConfig(updated);
     }
 
     if (isCustom && onSaveCustomSite) {
