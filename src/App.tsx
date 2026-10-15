@@ -97,6 +97,47 @@ export default function App() {
     }
   }, [activeTab]);
 
+  // Interceptador Global de Links para abrir sempre no navegador padrão do PC
+  useEffect(() => {
+    const handleGlobalClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      const anchor = target.closest('a');
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+
+      // Ignora links âncora internos (#) ou comandos javascript:
+      if (href.startsWith('#') || href.startsWith('javascript:')) return;
+
+      // Intercepta qualquer URL web ou email
+      if (
+        href.startsWith('http://') ||
+        href.startsWith('https://') ||
+        href.startsWith('mailto:') ||
+        href.startsWith('www.')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const finalUrl = href.startsWith('www.') ? `https://${href}` : href;
+
+        if (window.electronAPI?.openExternal) {
+          window.electronAPI.openExternal(finalUrl);
+        } else {
+          window.open(finalUrl, '_blank');
+        }
+      }
+    };
+
+    document.addEventListener('click', handleGlobalClick, true);
+    return () => {
+      document.removeEventListener('click', handleGlobalClick, true);
+    };
+  }, []);
+
   const [aiConfig, setAiConfig] = useState<AiAssistantConfig>(() => {
     try {
       const saved = localStorage.getItem('simplify_ai_config');

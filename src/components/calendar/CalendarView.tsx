@@ -125,6 +125,28 @@ function getDuration(s: string, e: string, allDay = false) {
   }
 }
 
+function renderDescriptionWithLinks(text: string) {
+  if (!text) return null;
+  const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: '#60a5fa', textDecoration: 'underline', wordBreak: 'break-all' }}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
 const navBtnStyle: React.CSSProperties = {
   padding: '6px 8px',
   borderRadius: '8px',
@@ -2381,7 +2403,7 @@ function EventDetailsModal({
                     overflowY: 'auto',
                   }}
                 >
-                  {event.description}
+                  {renderDescriptionWithLinks(event.description)}
                 </p>
               </div>
             </div>

@@ -53,14 +53,28 @@ export const OutlookView: React.FC = () => {
       setErrorMessage(e.errorDescription || 'Falha ao conectar aos servidores do Microsoft Outlook.');
     };
 
+    const handleNewWindow = (e: any) => {
+      e.preventDefault();
+      const targetUrl = e.url;
+      if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://') || targetUrl.startsWith('mailto:'))) {
+        if (window.electronAPI?.openExternal) {
+          window.electronAPI.openExternal(targetUrl);
+        } else {
+          window.open(targetUrl, '_blank');
+        }
+      }
+    };
+
     webview.addEventListener('did-start-loading', handleStartLoading);
     webview.addEventListener('did-stop-loading', handleStopLoading);
     webview.addEventListener('did-fail-load', handleFailLoad);
+    webview.addEventListener('new-window', handleNewWindow);
 
     return () => {
       webview.removeEventListener('did-start-loading', handleStartLoading);
       webview.removeEventListener('did-stop-loading', handleStopLoading);
       webview.removeEventListener('did-fail-load', handleFailLoad);
+      webview.removeEventListener('new-window', handleNewWindow);
     };
   }, []);
 

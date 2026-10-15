@@ -77,11 +77,24 @@ export const CustomWebView: React.FC<CustomWebViewProps> = ({ site, onOpenSettin
       setErrorMessage(e.errorDescription || `Falha ao conectar a ${site.title}.`);
     };
 
+    const handleNewWindow = (e: any) => {
+      e.preventDefault();
+      const targetUrl = e.url;
+      if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://') || targetUrl.startsWith('mailto:'))) {
+        if (window.electronAPI?.openExternal) {
+          window.electronAPI.openExternal(targetUrl);
+        } else {
+          window.open(targetUrl, '_blank');
+        }
+      }
+    };
+
     webview.addEventListener('did-start-loading', handleStartLoading);
     webview.addEventListener('did-stop-loading', handleStopLoading);
     webview.addEventListener('did-finish-load', handleStopLoading);
     webview.addEventListener('dom-ready', handleStopLoading);
     webview.addEventListener('did-fail-load', handleFailLoad);
+    webview.addEventListener('new-window', handleNewWindow);
 
     return () => {
       clearTimeout(safetyTimer);
@@ -90,6 +103,7 @@ export const CustomWebView: React.FC<CustomWebViewProps> = ({ site, onOpenSettin
       webview.removeEventListener('did-finish-load', handleStopLoading);
       webview.removeEventListener('dom-ready', handleStopLoading);
       webview.removeEventListener('did-fail-load', handleFailLoad);
+      webview.removeEventListener('new-window', handleNewWindow);
     };
   }, [site.id]);
 

@@ -216,6 +216,25 @@ function createWindow() {
     console.error('[Electron] Processo de renderização terminou inesperadamente:', details);
   });
 
+  // Abre links que solicitam nova janela (_blank, window.open) sempre no navegador padrão do sistema
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  // Impede que a janela principal navegue para URLs externas, abrindo-as no navegador padrão do PC
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isAppUrl = process.env.VITE_DEV_SERVER_URL
+      ? url.startsWith(process.env.VITE_DEV_SERVER_URL)
+      : url.startsWith('file://');
+    if (!isAppUrl && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
   // Load app HTML
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -1481,43 +1500,56 @@ function setupAiSession() {
   });
 }
 
+// Helper para identificar estritamente telas de popup de autenticação (OAuth/SSO)
+function isAuthPopupUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname.toLowerCase();
+
+    // Provedores de identidade e endpoints específicos de login / autorização
+    if (
+      host === 'login.microsoftonline.com' ||
+      host === 'login.live.com' ||
+      host === 'msftauth.net' ||
+      (host === 'accounts.google.com' && (pathname.includes('/signin') || pathname.includes('/o/oauth') || pathname.includes('/v3/signin'))) ||
+      host === 'appleid.apple.com' ||
+      host === 'auth0.openai.com' ||
+      host === 'auth.openai.com' ||
+      host === 'auth.anthropic.com' ||
+      host === 'id.atlassian.com'
+    ) {
+      return true;
+    }
+  } catch {
+    // Ignora URLs malformadas
+  }
+  return false;
+}
+
 // Global handler for webContents, popups, and SSO auth windows
 app.on('web-contents-created', (_, contents) => {
   contents.setUserAgent(MODERN_CHROME_UA);
   setupSpellCheckAndContextMenu(contents);
 
   contents.setWindowOpenHandler(({ url }) => {
-    if (
-      url.includes('login.microsoftonline.com') ||
-      url.includes('teams.microsoft.com') ||
-      url.includes('teams.live.com') ||
-      url.includes('outlook.office.com') ||
-      url.includes('outlook.live.com') ||
-      url.includes('outlook.office365.com') ||
-      url.includes('office.com') ||
-      url.includes('live.com') ||
-      url.includes('microsoft.com') ||
-      url.includes('msftauth.net') ||
-      url.includes('accounts.google.com') ||
-      url.includes('google.com') ||
-      url.includes('gstatic.com') ||
-      url.includes('googleusercontent.com') ||
-      url.includes('auth0.openai.com') ||
-      url.includes('auth.openai.com') ||
-      url.includes('openai.com') ||
-      url.includes('chatgpt.com') ||
-      url.includes('auth.anthropic.com') ||
-      url.includes('claude.ai') ||
-      url.includes('anthropic.com') ||
-      url.includes('id.atlassian.com') ||
-      url.includes('auth.atlassian.com') ||
-      url.includes('atlassian.net') ||
-      url.includes('atlassian.com') ||
-      url.includes('appleid.apple.com')
-    ) {
+    // Se for o webContents da janela principal da aplicação, SEMPRE abre no navegador externo
+    if (mainWindow && contents.id === mainWindow.webContents.id) {
+      if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
+    }
+
+    // Para WebViews: permite janelas popup APENAS se for autenticação SSO/OAuth estrita
+    if (isAuthPopupUrl(url)) {
       return { action: 'allow' };
     }
-    shell.openExternal(url);
+
+    // Todos os demais links (sites externos, artigos, links compartilhados em chat/email/notas/IAs) abrem no navegador padrão do PC
+    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+      shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
 });
