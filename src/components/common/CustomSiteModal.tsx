@@ -41,6 +41,7 @@ export interface CustomSiteModalProps {
       url: string;
       icon: string;
       color: string;
+      preload?: boolean;
     },
     targetGroupId: string
   ) => Promise<void> | void;
@@ -61,6 +62,7 @@ export const CustomSiteModal: React.FC<CustomSiteModalProps> = ({
   const [siteUrl, setSiteUrl] = useState('');
   const [siteIcon, setSiteIcon] = useState('globe');
   const [siteColor, setSiteColor] = useState('#0ea5e9');
+  const [sitePreload, setSitePreload] = useState(false);
   const [siteIconCategory, setSiteIconCategory] = useState<'brands' | 'system' | 'emoji' | 'upload'>('brands');
   const [siteEmojiInput, setSiteEmojiInput] = useState('');
   const [siteIconSearch, setSiteIconSearch] = useState('');
@@ -91,6 +93,7 @@ export const CustomSiteModal: React.FC<CustomSiteModalProps> = ({
       const iconVal = siteToEdit.icon || 'globe';
       setSiteIcon(iconVal);
       setSiteColor(siteToEdit.color || '#0ea5e9');
+      setSitePreload(siteToEdit.preload ?? false);
       setSiteIconSearch('');
       setCustomImageUrlInput('');
 
@@ -308,6 +311,7 @@ export const CustomSiteModal: React.FC<CustomSiteModalProps> = ({
           url,
           icon: siteIcon,
           color: siteColor,
+          preload: sitePreload,
         },
         siteTargetGroup
       );
@@ -1115,6 +1119,46 @@ export const CustomSiteModal: React.FC<CustomSiteModalProps> = ({
                   </option>
                 ))}
             </select>
+          </div>
+
+          {/* Opção de Pré-carregamento na Memória RAM */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 14px',
+              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            onClick={() => setSitePreload(!sitePreload)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="checkbox"
+                checked={sitePreload}
+                onChange={(e) => setSitePreload(e.target.checked)}
+                style={{
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                  accentColor: siteColor || 'var(--accent-primary)',
+                }}
+              />
+              <div>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff', display: 'block' }}>
+                  Pré-carregar sempre em segundo plano (na RAM)
+                </span>
+                <span style={{ fontSize: '11px', color: sitePreload ? '#34d399' : 'var(--text-muted)' }}>
+                  {sitePreload
+                    ? '⚡ Abre instantaneamente ao clicar (consome processos Chromium na memória).'
+                    : '⏱️ Economiza RAM: o site só carrega quando você clica nele.'}
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Ações do Modal */}

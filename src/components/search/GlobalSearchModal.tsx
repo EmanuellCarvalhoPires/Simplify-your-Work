@@ -19,7 +19,7 @@ import type {
   NoteFolder,
 } from '../../types/index';
 
-export type SearchCategory = 'ALL' | 'TICKETS' | 'NOTES' | 'FILES' | 'CALENDAR' | 'CLIENTS' | 'REMINDERS';
+export type SearchCategory = 'ALL' | 'NOTES' | 'FILES' | 'CALENDAR' | 'REMINDERS';
 
 export interface GlobalSearchResult {
   id: string;
@@ -74,36 +74,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     const folderMap = new Map<string, string>();
     folders.forEach((f) => folderMap.set(f.id, f.name));
 
-    // A. TICKETS
-    if (activeCategory === 'ALL' || activeCategory === 'TICKETS') {
-      tickets.forEach((t) => {
-        const matches =
-          !q ||
-          t.title.toLowerCase().includes(q) ||
-          (t.key && t.key.toLowerCase().includes(q)) ||
-          (t.description && t.description.toLowerCase().includes(q)) ||
-          (t.assignee && t.assignee.toLowerCase().includes(q)) ||
-          (t.labels && t.labels.some((l) => l.toLowerCase().includes(q)));
-
-        if (matches) {
-          results.push({
-            id: `ticket_${t.id}`,
-            type: 'ticket',
-            title: t.title,
-            subtitle: `${t.key || 'LOCAL'} • ${t.statusLabel || t.status} • Resp: ${t.assignee || 'Eu'}`,
-            badge: t.key || 'TICKET',
-            badgeColor: t.source === 'JIRA' ? '#60a5fa' : '#a5b4fc',
-            badgeBg: t.source === 'JIRA' ? 'rgba(0, 82, 204, 0.25)' : 'rgba(99, 102, 241, 0.25)',
-            icon: LayoutDashboard,
-            iconColor: t.source === 'JIRA' ? '#3b82f6' : '#6366f1',
-            rawItem: t,
-            updatedAt: t.updatedAt,
-          });
-        }
-      });
-    }
-
-    // B. NOTES & ANOTAÇÕES (Text / Markdown / RichText)
+    // A. NOTES & ANOTAÇÕES (Text / Markdown / RichText)
     if (activeCategory === 'ALL' || activeCategory === 'NOTES') {
       notes
         .filter((n) => n.format !== 'file')
@@ -193,36 +164,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       });
     }
 
-    // E. CLIENTS & ASSETS (JSM)
-    if (activeCategory === 'ALL' || activeCategory === 'CLIENTS') {
-      clients.forEach((c) => {
-        const matches =
-          !q ||
-          c.name.toLowerCase().includes(q) ||
-          (c.description && c.description.toLowerCase().includes(q)) ||
-          (c.contactEmail && c.contactEmail.toLowerCase().includes(q));
-
-        if (matches) {
-          results.push({
-            id: `client_${c.id}`,
-            type: 'client',
-            title: c.name,
-            subtitle: c.description
-              ? `${c.description.slice(0, 75)}...`
-              : `Cliente / Asset • Status: ${c.status || 'Ativo'}`,
-            badge: 'CLIENTE',
-            badgeColor: c.color || '#6366f1',
-            badgeBg: `${c.color || '#6366f1'}25`,
-            icon: Briefcase,
-            iconColor: c.color || '#6366f1',
-            rawItem: c,
-            updatedAt: c.updatedAt,
-          });
-        }
-      });
-    }
-
-    // F. REMINDERS & ALARMES
+    // C. REMINDERS & ALARMES
     if (activeCategory === 'ALL' || activeCategory === 'REMINDERS') {
       reminders.forEach((r) => {
         const matches =
@@ -353,11 +295,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
   const categoriesConfig: Array<{ id: SearchCategory; label: string; count?: number }> = [
     { id: 'ALL', label: 'Tudo' },
-    { id: 'TICKETS', label: 'Tickets' },
     { id: 'NOTES', label: 'Anotações' },
     { id: 'FILES', label: 'Arquivos' },
     { id: 'CALENDAR', label: 'Agenda' },
-    { id: 'CLIENTS', label: 'Clientes' },
     { id: 'REMINDERS', label: 'Alarmes' },
   ];
 
@@ -414,7 +354,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Pesquisar em todo o app (tickets, anotações, arquivos, reuniões, clientes)..."
+            placeholder="Pesquisar em todo o app (anotações, arquivos, reuniões, alarmes)..."
             style={{
               flex: 1,
               background: 'transparent',

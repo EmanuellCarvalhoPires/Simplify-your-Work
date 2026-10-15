@@ -68,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div
         style={styles.searchBox}
         onClick={() => onOpenGlobalSearch && onOpenGlobalSearch()}
-        title="Buscar tickets, anotações, arquivos, agenda, clientes... (Ctrl + K)"
+        title="Buscar anotações, arquivos, agenda, lembretes... (Ctrl + K)"
       >
         <div
           style={{
@@ -87,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)' }}>
             <Search size={16} color="var(--accent-primary)" />
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Pesquisar em todo o app (tickets, notas, arquivos, agenda, clientes)...
+              Pesquisar em todo o app (notas, arquivos, agenda, lembretes)...
             </span>
           </div>
 

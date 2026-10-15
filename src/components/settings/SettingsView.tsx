@@ -59,6 +59,8 @@ import {
   Folder,
   PlusCircle,
   Zap,
+  Clock,
+  Cpu,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -229,6 +231,64 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [editingTopicName, setEditingTopicName] = useState('');
   const [sidebarNotice, setSidebarNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Estado de Pré-carregamento dos Sites (Otimização de Memória RAM)
+  const [sitesPreloadConfig, setSitesPreloadConfig] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_sites_preload');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Erro ao ler simplify_sites_preload:', e);
+    }
+    return {};
+  });
+
+  const isWebSiteItem = (itemId: string): boolean => {
+    if (!itemId) return false;
+    if (localCustomSites.some((s) => s.id === itemId)) return true;
+    if (itemId === 'teams' || itemId === 'outlook') return true;
+    if (itemId.startsWith('ai_')) return true;
+    return false;
+  };
+
+  const isItemPreloaded = (itemId: string): boolean => {
+    if (sitesPreloadConfig[itemId] !== undefined) {
+      return !!sitesPreloadConfig[itemId];
+    }
+    const isCustom = localCustomSites.find((s) => s.id === itemId);
+    if (isCustom && isCustom.preload !== undefined) {
+      return !!isCustom.preload;
+    }
+    return false; // Padrão: sob demanda ao clicar (economiza memória RAM)
+  };
+
+  const handleTogglePreload = (itemId: string) => {
+    const isCustom = localCustomSites.find((s) => s.id === itemId);
+    const currentlyPreloaded = isItemPreloaded(itemId);
+    const nextVal = !currentlyPreloaded;
+
+    const updated = { ...sitesPreloadConfig, [itemId]: nextVal };
+    setSitesPreloadConfig(updated);
+    try {
+      localStorage.setItem('simplify_sites_preload', JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+
+    if (isCustom && onSaveCustomSite) {
+      const updatedSite: CustomSite = { ...isCustom, preload: nextVal };
+      onSaveCustomSite(updatedSite);
+    }
+
+    const itemLabel = isCustom?.title || (ALL_NAV_ITEMS as any)[itemId]?.label || itemId;
+    setSidebarNotice({
+      type: 'success',
+      message: nextVal
+        ? `"${itemLabel}" agora ficará pré-carregado sempre na RAM (acesso imediato).`
+        : `"${itemLabel}" agora carregará apenas ao clicar (economizando memória RAM).`,
+    });
+    setTimeout(() => setSidebarNotice(null), 3500);
+  };
 
   useEffect(() => {
     if (sidebarConfig) {
@@ -2487,6 +2547,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             )}
 
+            {/* Card Informativo sobre Gestão de Memória RAM e Pré-carregamento */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                marginBottom: '20px',
+              }}
+            >
+              <Cpu size={20} color="#38bdf8" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ color: '#38bdf8', fontSize: '13px', display: 'block', marginBottom: '4px' }}>
+                  ⚡ Controle de Memória RAM & Pré-carregamento de Sites
+                </strong>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  Sites e assistentes da web consomem processos Chromium na memória. Você pode alternar individualmente em cada botão abaixo:
+                  <br />
+                  • <strong style={{ color: '#34d399' }}>Pré-carregado</strong>: Mantém o site ativo em segundo plano na RAM para você abrir instantaneamente ao clicar.
+                  <br />
+                  • <strong style={{ color: '#fbbf24' }}>Ao clicar</strong>: Economiza memória RAM liberando os recursos quando a aba não estiver aberta. O site só carrega quando você clica nele.
+                </p>
+              </div>
+            </div>
+
             {/* Form to Create New Topic */}
             <form
               onSubmit={handleCreateTopic}
@@ -2812,6 +2900,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                                   {/* Ações do Item */}
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    {/* Botão de Pré-carregamento (Otimização de RAM) */}
+                                    {isWebSiteItem(childId) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleTogglePreload(childId)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          padding: '3px 7px',
+                                          borderRadius: '5px',
+                                          border: isItemPreloaded(childId) ? '1px solid #10b98155' : '1px solid rgba(255, 255, 255, 0.12)',
+                                          backgroundColor: isItemPreloaded(childId) ? 'rgba(16, 185, 129, 0.16)' : 'rgba(255, 255, 255, 0.05)',
+                                          color: isItemPreloaded(childId) ? '#34d399' : 'var(--text-muted)',
+                                          cursor: 'pointer',
+                                          fontSize: '10.5px',
+                                          fontWeight: 600,
+                                          transition: 'all 0.15s ease',
+                                        }}
+                                        title={
+                                          isItemPreloaded(childId)
+                                            ? 'Pré-carregado sempre: fica na memória RAM para acesso instantâneo. Clique para alternar para "Ao clicar" e economizar RAM.'
+                                            : 'Ao clicar: economiza memória RAM (só carrega ao abrir a aba). Clique para manter sempre pré-carregado em 2º plano.'
+                                        }
+                                      >
+                                        {isItemPreloaded(childId) ? (
+                                          <>
+                                            <Zap size={11} color="#34d399" />
+                                            <span>Pré-carregado</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Clock size={11} color="var(--text-muted)" />
+                                            <span>Ao clicar</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    )}
                                     {customSiteObj && (
                                       <>
                                         <button
@@ -2993,6 +3119,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                         {/* Ações do Botão Avulso */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {/* Botão de Pré-carregamento (Otimização de RAM) */}
+                          {isWebSiteItem(entry.id) && (
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePreload(entry.id)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                border: isItemPreloaded(entry.id) ? '1px solid #10b98155' : '1px solid rgba(255, 255, 255, 0.12)',
+                                backgroundColor: isItemPreloaded(entry.id) ? 'rgba(16, 185, 129, 0.16)' : 'rgba(255, 255, 255, 0.05)',
+                                color: isItemPreloaded(entry.id) ? '#34d399' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                transition: 'all 0.15s ease',
+                              }}
+                              title={
+                                isItemPreloaded(entry.id)
+                                  ? 'Pré-carregado sempre: fica na memória RAM para acesso instantâneo. Clique para alternar para "Ao clicar" e economizar RAM.'
+                                  : 'Ao clicar: economiza memória RAM (só carrega ao abrir a aba). Clique para manter sempre pré-carregado em 2º plano.'
+                              }
+                            >
+                              {isItemPreloaded(entry.id) ? (
+                                <>
+                                  <Zap size={12} color="#34d399" />
+                                  <span>Pré-carregado</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock size={12} color="var(--text-muted)" />
+                                  <span>Ao clicar</span>
+                                </>
+                              )}
+                            </button>
+                          )}
                           {customSiteObj && (
                             <>
                               <button
@@ -3128,7 +3292,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       const itemDef = getNavItemDef(entry.id, localCustomSites);
                       if (!itemDef) return null;
                       const Icon = itemDef.icon;
-                      const isActive = entry.id === 'tickets';
+                      const isActive = entry.id === 'calendar';
 
                       return (
                         <div

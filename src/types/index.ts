@@ -167,6 +167,7 @@ export interface CustomSite {
   icon?: string;
   color?: string;
   partition?: string;
+  preload?: boolean;
   createdAt: string;
 }
 

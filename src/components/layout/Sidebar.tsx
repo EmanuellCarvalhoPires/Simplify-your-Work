@@ -18,6 +18,8 @@ import {
   Copy,
   Plus,
   PlusCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import type {
   AiAssistantConfig,
@@ -44,10 +46,8 @@ export const SITE_ICONS = ALL_BRAND_AND_LUCIDE_ICONS;
 const SETTINGS_COLOR = '#a855f7';
 
 export const ALL_NAV_ITEMS: Record<string, NavItemDef> = {
-  tickets: { id: 'tickets', label: 'Tickets', icon: LayoutDashboard, color: '#38bdf8' },
   calendar: { id: 'calendar', label: 'Agenda', icon: Calendar, color: '#f59e0b' },
   notes: { id: 'notes', label: 'Anotações', icon: FileText, color: '#eab308' },
-  clients: { id: 'clients', label: 'Clientes', icon: Briefcase, color: '#10b981' },
   reminders: { id: 'reminders', label: 'Lembretes', icon: Bell, color: '#f43f5e' },
   teams: { id: 'teams', label: 'Teams', icon: MessagesSquare, color: '#818cf8' },
   outlook: { id: 'outlook', label: 'Outlook', icon: Mail, color: '#0ea5e9' },
@@ -120,9 +120,7 @@ export const DEFAULT_SIDEBAR_CONFIG: SidebarConfig = {
     },
     { type: 'item', id: 'calendar' },
     { type: 'item', id: 'notes' },
-    { type: 'item', id: 'clients' },
     { type: 'item', id: 'reminders' },
-    { type: 'item', id: 'tickets' },
   ],
 };
 
@@ -137,11 +135,16 @@ export const normalizeSidebarConfig = (
 
   const validSiteIds = new Set((customSites || []).map((s) => s && s.id).filter(Boolean));
 
-  // 1. Limpar IDs de sites customizados que foram deletados (não constam em customSites)
+  // 1. Limpar IDs de tickets, clients e sites customizados que foram deletados
+  const isExcludedItem = (id: string) => id === 'tickets' || id === 'clients';
+
   const cleanedEntries: SidebarEntry[] = [];
   safeEntries.forEach((entry) => {
     if (!entry) return;
     if (entry.type === 'item') {
+      if (entry.id && isExcludedItem(entry.id)) {
+        return;
+      }
       if (entry.id && String(entry.id).startsWith('site_')) {
         if (validSiteIds.has(entry.id)) {
           cleanedEntries.push(entry);
@@ -151,6 +154,7 @@ export const normalizeSidebarConfig = (
       }
     } else if (entry.type === 'group') {
       const filteredItemIds = (entry.itemIds || []).filter((id) => {
+        if (id && isExcludedItem(id)) return false;
         if (id && String(id).startsWith('site_')) {
           return validSiteIds.has(id);
         }
@@ -303,6 +307,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return normalizeSidebarConfig(raw, customSites, aiConfig);
   });
 
+  // Estado de recolhimento da barra lateral
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('simplify_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapse = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('simplify_sidebar_collapsed', String(next));
+      } catch (e) {
+        console.error('Erro ao salvar estado recolhido da sidebar:', e);
+      }
+      return next;
+    });
+  };
+
   // Estado do Menu de Contexto (botão direito)
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -358,6 +383,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isTabAvailable = (tabId: NavTab): boolean => {
     if (!tabId || typeof tabId !== 'string') return false;
     if (tabId === 'settings') return false;
+    if (tabId === 'tickets' || tabId === 'clients') return false;
     if (tabId.startsWith('ai_')) {
       const prov = tabId.replace('ai_', '') as any;
       return enabledAi.includes(prov);
@@ -397,7 +423,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     return (
       <div key={tabId} style={{ position: 'relative', width: '100%' }}>
-        {isGroupChild && (
+        {isGroupChild && !isCollapsed && (
           <div
             style={{
               position: 'absolute',
@@ -418,18 +444,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onContextMenu={handleContextMenu}
           style={{
             ...styles.navButton,
-            ...(isGroupChild ? styles.groupChildButton : {}),
+            justifyContent: isCollapsed ? 'center' : 'flex-start',
+            padding: isCollapsed ? '8px 0' : (isGroupChild ? '6px 8px 6px 14px' : '8px 10px'),
+            ...(isGroupChild && !isCollapsed ? styles.groupChildButton : {}),
             ...(isActive ? styles.activeNavButton : {}),
           }}
-          title={customSiteObj ? `${item.label} (${customSiteObj.url}) - Clique direito para opções` : item.label}
+          title={customSiteObj ? `${item.label} (${customSiteObj.url})` : item.label}
         >
           {isActive && (
             <div
               style={{
                 position: 'absolute',
                 left: 0,
-                top: '20%',
-                bottom: '20%',
+                top: isCollapsed ? '15%' : '20%',
+                bottom: isCollapsed ? '15%' : '20%',
                 width: '3px',
                 backgroundColor: '#ffffff',
                 borderRadius: '0 4px 4px 0',
@@ -442,26 +470,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: isGroupChild ? '24px' : '26px',
-              height: isGroupChild ? '24px' : '26px',
+              width: isCollapsed ? '28px' : (isGroupChild ? '24px' : '26px'),
+              height: isCollapsed ? '28px' : (isGroupChild ? '24px' : '26px'),
               borderRadius: '7px',
               backgroundColor: isActive ? 'rgba(255, 255, 255, 0.2)' : `${item.color || '#38bdf8'}22`,
               flexShrink: 0,
               transition: 'all 0.15s ease',
             }}
           >
-            <Icon size={isGroupChild ? 15 : 16} color={isActive ? '#ffffff' : (item.color || '#38bdf8')} />
+            <Icon size={isCollapsed ? 16 : (isGroupChild ? 15 : 16)} color={isActive ? '#ffffff' : (item.color || '#38bdf8')} />
           </div>
-          <span
-            style={{
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              fontSize: isGroupChild ? '12.5px' : '13px',
-            }}
-          >
-            {item.label}
-          </span>
+          {!isCollapsed && (
+            <span
+              style={{
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                fontSize: isGroupChild ? '12.5px' : '13px',
+              }}
+            >
+              {item.label}
+            </span>
+          )}
         </button>
       </div>
     );
@@ -505,12 +535,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      style={styles.sidebar}
+      style={{
+        ...styles.sidebar,
+        width: isCollapsed ? '64px' : '190px',
+        padding: isCollapsed ? '14px 6px' : '14px 10px',
+        transition: 'width 0.18s cubic-bezier(0.4, 0, 0.2, 1), padding 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
       onContextMenu={handleContainerContextMenu}
     >
-      {/* Sidebar Top Title Pill */}
-      <div style={styles.headerBox}>
-        <span style={styles.headerTitle}>Painel</span>
+      {/* Sidebar Top Title Pill com Botão de Recolher/Expandir */}
+      <div
+        style={{
+          ...styles.headerBox,
+          padding: isCollapsed ? '8px 4px' : '8px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isCollapsed ? 'center' : 'space-between',
+        }}
+      >
+        {!isCollapsed && <span style={styles.headerTitle}>Painel</span>}
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            padding: '4px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.15s ease',
+          }}
+          title={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+          aria-label={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+        >
+          {isCollapsed ? <PanelLeftOpen size={17} color="var(--accent-primary)" /> : <PanelLeftClose size={15} />}
+        </button>
       </div>
 
       {/* Main Navigation Links com Tópicos Agrupadores */}
@@ -528,48 +591,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             return (
               <div key={entry.id || Math.random().toString()} style={styles.groupContainer}>
-                {/* Cabeçalho do Tópico (Sempre visível/não colapsável) */}
-                <div
-                  style={styles.groupHeader}
-                  title={`Tópico: ${entry.title} - Clique com botão direito para opções`}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setContextMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      type: 'group',
-                      groupId: entry.id,
-                      groupTitle: entry.title,
-                    });
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
-                    <ChevronDown size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                    <Folder size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
-                    <span style={styles.groupTitleText}>{entry.title}</span>
-                  </div>
-
-                  {/* Atalho rápido para adicionar site no tópico */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onOpenCreateSiteModal) {
-                        onOpenCreateSiteModal(entry.id);
-                      } else {
-                        onSelectTab('settings');
-                      }
+                {/* Cabeçalho do Tópico */}
+                {isCollapsed ? (
+                  <div
+                    style={{
+                      margin: '6px 4px 4px 4px',
+                      borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                      paddingTop: '4px',
                     }}
-                    style={styles.topicAddBtn}
-                    title={`Adicionar site diretamente no tópico "${entry.title}"`}
+                    title={`Tópico: ${entry.title}`}
+                  />
+                ) : (
+                  <div
+                    style={styles.groupHeader}
+                    title={`Tópico: ${entry.title} - Clique com botão direito para opções`}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        type: 'group',
+                        groupId: entry.id,
+                        groupTitle: entry.title,
+                      });
+                    }}
                   >
-                    <Plus size={11} />
-                  </button>
-                </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                      <ChevronDown size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                      <Folder size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                      <span style={styles.groupTitleText}>{entry.title}</span>
+                    </div>
+
+                    {/* Atalho rápido para adicionar site no tópico */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenCreateSiteModal) {
+                          onOpenCreateSiteModal(entry.id);
+                        } else {
+                          onSelectTab('settings');
+                        }
+                      }}
+                      style={styles.topicAddBtn}
+                      title={`Adicionar site diretamente no tópico "${entry.title}"`}
+                    >
+                      <Plus size={11} />
+                    </button>
+                  </div>
+                )}
 
                 {/* Sub-itens do Tópico */}
-                <div style={styles.groupItemsContainer}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '3px',
+                    position: 'relative',
+                    marginLeft: isCollapsed ? '0' : '6px',
+                    borderLeft: isCollapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+                    paddingLeft: isCollapsed ? '0' : '4px',
+                  }}
+                >
                   {visibleChildIds.map((childId) => renderNavButton(childId, true))}
                 </div>
               </div>
@@ -583,7 +667,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {missingAvailableItems.map((missingId) => renderNavButton(missingId, false))}
 
         {/* Botão de Ação Rápida: + Adicionar Site Web */}
-        <div style={{ marginTop: '10px', padding: '0 4px' }}>
+        <div style={{ marginTop: '10px', padding: isCollapsed ? '0' : '0 4px', display: 'flex', justifyContent: 'center' }}>
           <button
             type="button"
             onClick={() => {
@@ -593,11 +677,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onSelectTab('settings');
               }
             }}
-            style={styles.quickAddSiteButton}
+            style={{
+              ...styles.quickAddSiteButton,
+              justifyContent: isCollapsed ? 'center' : 'flex-start',
+              padding: isCollapsed ? '8px 0' : '6px 10px',
+            }}
             title="Adicionar um novo site ou aplicativo web na barra lateral"
           >
-            <PlusCircle size={14} color="#38bdf8" />
-            <span>Adicionar Site</span>
+            <PlusCircle size={isCollapsed ? 16 : 14} color="#38bdf8" />
+            {!isCollapsed && <span>Adicionar Site</span>}
           </button>
         </div>
       </nav>
@@ -608,8 +696,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onClick={() => onSelectTab('settings')}
           style={{
             ...styles.navButton,
+            justifyContent: isCollapsed ? 'center' : 'flex-start',
+            padding: isCollapsed ? '8px 0' : '8px 10px',
             ...(activeTab === 'settings' ? styles.activeNavButton : {}),
           }}
+          title="Configurações"
         >
           <div
             style={{
@@ -626,7 +717,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <Settings size={16} color={activeTab === 'settings' ? '#ffffff' : SETTINGS_COLOR} />
           </div>
-          <span style={{ fontSize: '13px' }}>Configurações</span>
+          {!isCollapsed && <span style={{ fontSize: '13px' }}>Configurações</span>}
         </button>
       </div>
 

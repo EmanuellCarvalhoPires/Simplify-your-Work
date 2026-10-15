@@ -64,8 +64,38 @@ class ViewErrorBoundary extends React.Component<
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<NavTab>('tickets');
+  const [activeTab, setActiveTab] = useState<NavTab>('calendar');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Estado de Pré-carregamento de Sites na RAM
+  const [sitesPreloadConfig, setSitesPreloadConfig] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('simplify_sites_preload');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Erro ao ler simplify_sites_preload:', e);
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'simplify_sites_preload' && e.newValue) {
+        try {
+          setSitesPreloadConfig(JSON.parse(e.newValue));
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // Redireciona tabs deletadas para a Agenda
+  useEffect(() => {
+    if (activeTab === 'tickets' || activeTab === 'clients') {
+      setActiveTab('calendar');
+    }
+  }, [activeTab]);
 
   const [aiConfig, setAiConfig] = useState<AiAssistantConfig>(() => {
     try {
@@ -135,6 +165,16 @@ export default function App() {
       }
       return updated;
     });
+
+    if (site.preload !== undefined) {
+      setSitesPreloadConfig((prev) => {
+        const updated = { ...prev, [site.id]: site.preload! };
+        try {
+          localStorage.setItem('simplify_sites_preload', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    }
   };
 
   const handleDeleteCustomSite = (id: string) => {
@@ -168,7 +208,7 @@ export default function App() {
     }
 
     if (activeTab === id) {
-      setActiveTab('tickets');
+      setActiveTab('calendar');
     }
   };
 
@@ -1305,28 +1345,6 @@ export default function App() {
 
         <main style={styles.viewContent}>
           <ViewErrorBoundary>
-            {activeTab === 'tickets' && (
-              <TicketBoard
-                tickets={tickets}
-                notes={notes}
-                jiraInstances={jiraInstances}
-                searchQuery={searchQuery}
-                activeUser={activeUser}
-                onFetchJiraTicket={handleFetchJiraTicket}
-                onRefreshTickets={loadTickets}
-                onSaveTicket={handleSaveTicket}
-                onUpdateStatus={handleUpdateTicketStatus}
-                onDeleteTicket={handleDeleteTicket}
-                onDeleteTickets={handleDeleteTickets}
-                onBatchUpdateStatus={handleBatchUpdateTicketStatus}
-                onOpenSettings={() => setActiveTab('settings')}
-                onNavigateToNote={(noteId) => {
-                  setTargetNoteIdForNotesView(noteId);
-                  setActiveTab('notes');
-                }}
-              />
-            )}
-
             {activeTab === 'calendar' && (
               <CalendarView
                 notes={notes}
@@ -1343,10 +1361,6 @@ export default function App() {
                 targetNoteId={targetNoteIdForNotesView}
                 onClearTargetNote={() => setTargetNoteIdForNotesView(null)}
                 onSaveClient={handleSaveClient}
-                onNavigateToClient={(clientId) => {
-                  setTargetClientIdForClientsView(clientId);
-                  setActiveTab('clients');
-                }}
                 onCreateNote={handleCreateNote}
                 onCreateRichNote={handleCreateRichNote}
                 onSaveFileNote={handleSaveFileNote}
@@ -1362,29 +1376,6 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'clients' && (
-              <ClientsView
-                clients={clients}
-                tickets={tickets}
-                notes={notes}
-                folders={noteFolders}
-                calendarEvents={calendarEvents}
-                reminders={reminders}
-                jiraInstances={jiraInstances}
-                initialClientId={targetClientIdForClientsView}
-                onSaveClient={handleSaveClient}
-                onDeleteClient={handleDeleteClient}
-                onSaveTicket={handleSaveTicket}
-                onUpdateTicketStatus={handleUpdateTicketStatus}
-                onDeleteTicket={handleDeleteTicket}
-                onReadNoteContent={handleReadNoteContent}
-                onNavigateToNote={(noteId) => {
-                  setTargetNoteIdForNotesView(noteId);
-                  setActiveTab('notes');
-                }}
-              />
-            )}
-
             {activeTab === 'reminders' && (
               <ReminderManager
                 reminders={reminders}
@@ -1393,72 +1384,86 @@ export default function App() {
               />
             )}
 
-            {/* Microsoft Teams View (WebView Isolado e Persistente em Segundo Plano) */}
-            <div
-              style={{
-                display: activeTab === 'teams' ? 'flex' : 'none',
-                flex: 1,
-                width: '100%',
-                height: '100%',
-                overflow: 'hidden',
-              }}
-            >
-              <TeamsView />
-            </div>
-
-            {/* Microsoft Outlook View (WebView Isolado e Persistente em Segundo Plano) */}
-            <div
-              style={{
-                display: activeTab === 'outlook' ? 'flex' : 'none',
-                flex: 1,
-                width: '100%',
-                height: '100%',
-                overflow: 'hidden',
-              }}
-            >
-              <OutlookView />
-            </div>
-
-            {/* AI Assistants Persistent Webviews (ChatGPT, Claude, Gemini) */}
-            {(aiConfig.enabledProviders || (aiConfig.provider && aiConfig.provider !== 'none' ? [aiConfig.provider] : []))
-              .filter((p) => p !== ('rovo' as any))
-              .map((provider) => (
-                <div
-                  key={provider}
-                  style={{
-                    display: activeTab === `ai_${provider}` ? 'flex' : 'none',
-                    flex: 1,
-                    width: '100%',
-                    height: '100%',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <AiAssistantView
-                    provider={provider}
-                    onOpenSettings={() => setActiveTab('settings')}
-                  />
-                </div>
-              ))}
-
-            {/* Custom Sites Persistent Webviews (OneDrive, SharePoint, WhatsApp, GitHub, etc.) */}
-            {customSites.map((site) => (
+            {/* Microsoft Teams View (Suporta Pré-carregamento ou Descarregamento para Economizar RAM) */}
+            {(sitesPreloadConfig['teams'] || activeTab === 'teams') && (
               <div
-                key={site.id}
                 style={{
-                  display: activeTab === site.id ? 'flex' : 'none',
+                  display: activeTab === 'teams' ? 'flex' : 'none',
                   flex: 1,
                   width: '100%',
                   height: '100%',
                   overflow: 'hidden',
                 }}
               >
-                <CustomWebView
-                  site={site}
-                  onOpenSettings={() => setActiveTab('settings')}
-                  onEditSite={handleOpenEditSiteModal}
-                />
+                <TeamsView />
               </div>
-            ))}
+            )}
+
+            {/* Microsoft Outlook View (Suporta Pré-carregamento ou Descarregamento para Economizar RAM) */}
+            {(sitesPreloadConfig['outlook'] || activeTab === 'outlook') && (
+              <div
+                style={{
+                  display: activeTab === 'outlook' ? 'flex' : 'none',
+                  flex: 1,
+                  width: '100%',
+                  height: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                <OutlookView />
+              </div>
+            )}
+
+            {/* AI Assistants Webviews (ChatGPT, Claude, Gemini - Suporta Pré-carregamento ou Economia de RAM) */}
+            {(aiConfig.enabledProviders || (aiConfig.provider && aiConfig.provider !== 'none' ? [aiConfig.provider] : []))
+              .filter((p) => p !== ('rovo' as any))
+              .map((provider) => {
+                const isPreloaded = !!sitesPreloadConfig[`ai_${provider}`];
+                if (!isPreloaded && activeTab !== `ai_${provider}`) return null;
+
+                return (
+                  <div
+                    key={provider}
+                    style={{
+                      display: activeTab === `ai_${provider}` ? 'flex' : 'none',
+                      flex: 1,
+                      width: '100%',
+                      height: '100%',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <AiAssistantView
+                      provider={provider}
+                      onOpenSettings={() => setActiveTab('settings')}
+                    />
+                  </div>
+                );
+              })}
+
+            {/* Custom Sites Webviews (OneDrive, SharePoint, WhatsApp, GitHub, etc. - Suporta Pré-carregamento ou Economia de RAM) */}
+            {customSites.map((site) => {
+              const isPreloaded = sitesPreloadConfig[site.id] !== undefined ? !!sitesPreloadConfig[site.id] : !!site.preload;
+              if (!isPreloaded && activeTab !== site.id) return null;
+
+              return (
+                <div
+                  key={site.id}
+                  style={{
+                    display: activeTab === site.id ? 'flex' : 'none',
+                    flex: 1,
+                    width: '100%',
+                    height: '100%',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <CustomWebView
+                    site={site}
+                    onOpenSettings={() => setActiveTab('settings')}
+                    onEditSite={handleOpenEditSiteModal}
+                  />
+                </div>
+              );
+            })}
 
             {activeTab === 'settings' && (
               <SettingsView
@@ -1485,23 +1490,13 @@ export default function App() {
             )}
 
             {/* Fallback de Segurança: Garante que a tela NUNCA fique vazia caso a aba ativa não seja encontrada */}
-            {!['tickets', 'calendar', 'notes', 'clients', 'reminders', 'teams', 'outlook', 'settings'].includes(activeTab) &&
+            {!['calendar', 'notes', 'reminders', 'teams', 'outlook', 'settings'].includes(activeTab) &&
               !activeTab.startsWith('ai_') &&
               !customSites.some((s) => s.id === activeTab) && (
-                <TicketBoard
-                  tickets={tickets}
+                <CalendarView
                   notes={notes}
-                  jiraInstances={jiraInstances}
-                  searchQuery={searchQuery}
-                  activeUser={activeUser}
-                  onFetchJiraTicket={handleFetchJiraTicket}
-                  onRefreshTickets={loadTickets}
-                  onSaveTicket={handleSaveTicket}
-                  onUpdateStatus={handleUpdateTicketStatus}
-                  onDeleteTicket={handleDeleteTicket}
-                  onDeleteTickets={handleDeleteTickets}
-                  onBatchUpdateStatus={handleBatchUpdateTicketStatus}
-                  onOpenSettings={() => setActiveTab('settings')}
+                  onOpenFileViewer={handleOpenFileViewer}
+                  onCreateNote={handleCreateRichNote}
                 />
               )}
           </ViewErrorBoundary>
